@@ -1,0 +1,61 @@
+import AppKit
+
+@MainActor
+final class StatusItemController: NSObject {
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    private let panelController: PanelController
+
+    init(panelController: PanelController) {
+        self.panelController = panelController
+        super.init()
+        if let button = statusItem.button {
+            button.image = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "Jaimo clip")
+            button.image?.isTemplate = true
+            button.toolTip = "Jaimo clip · ⌥Space"
+            button.target = self
+            button.action = #selector(handleClick)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+    }
+
+    @objc private func handleClick() {
+        guard let event = NSApp.currentEvent else {
+            panelController.toggle()
+            return
+        }
+        if event.type == .rightMouseUp {
+            showMenu()
+        } else {
+            panelController.toggle()
+        }
+    }
+
+    private func showMenu() {
+        let menu = NSMenu()
+        let show = NSMenuItem(title: "显示 Jaimo clip", action: #selector(showPanel), keyEquivalent: "")
+        show.target = self
+        menu.addItem(show)
+        let update = NSMenuItem(title: "检查更新…", action: #selector(checkForUpdates), keyEquivalent: "")
+        update.target = self
+        menu.addItem(update)
+        menu.addItem(.separator())
+        let quit = NSMenuItem(title: "退出 Jaimo clip", action: #selector(quitApplication), keyEquivalent: "q")
+        quit.target = self
+        menu.addItem(quit)
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    @objc private func showPanel() {
+        panelController.show()
+    }
+
+    @objc private func checkForUpdates() {
+        panelController.showUpdateSettings()
+    }
+
+    @objc private func quitApplication() {
+        NSApp.terminate(nil)
+    }
+}
