@@ -414,14 +414,11 @@ private struct PreviewView: View {
                         .shadow(color: .black.opacity(0.5), radius: 12, y: 8)
                         .accessibilityLabel(item.imageAlt ?? item.title)
                 } else {
-                    ScrollView {
-                        Text(item.fullText ?? item.title)
-                            .font(.system(size: 11.5, design: .monospaced))
-                            .foregroundStyle(theme.foregroundSecondary)
-                            .lineSpacing(8.5)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .textSelection(.enabled)
-                    }
+                    ProgressiveTextView(
+                        text: item.fullText ?? item.title,
+                        foreground: theme.foregroundSecondary
+                    )
+                    .id(item.id)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -501,6 +498,45 @@ private struct PreviewView: View {
             .lineSpacing(8)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(24)
+    }
+}
+
+private struct ProgressiveTextView: View {
+    let chunks: [TextChunker.Chunk]
+    let foreground: Color
+    @State private var renderedChunkCount = 1
+
+    init(text: String, foreground: Color) {
+        chunks = TextChunker.chunks(from: text)
+        self.foreground = foreground
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 8.5) {
+                ForEach(chunks.indices.prefix(renderedChunkCount), id: \.self) { index in
+                    Text(chunks[index].text)
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .foregroundStyle(foreground)
+                        .lineSpacing(8.5)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .textSelection(.enabled)
+                }
+
+                if renderedChunkCount < chunks.count {
+                    Color.clear
+                        .frame(height: 1)
+                        .id(renderedChunkCount)
+                        .onAppear(perform: renderNextChunk)
+                        .accessibilityHidden(true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private func renderNextChunk() {
+        renderedChunkCount = min(renderedChunkCount + 1, chunks.count)
     }
 }
 

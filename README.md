@@ -4,7 +4,7 @@
 
 Jaimo clip 是一个轻量、原生、本地优先的 macOS 剪贴板历史工具。当前实现以 `clipflow-app.html` 为唯一视觉真源，以 `clipflow-handoff-spec.md` 为实现契约；不包含 Electron、WebView、账户、云同步或 AI 运行时。
 
-> 当前公开版本：`0.3.0`。仅支持 Apple Silicon（M1/M2/M3/M4 及后续芯片），不提供 Intel（x86_64）版本。
+> 当前公开版本：`0.3.1`。仅支持 Apple Silicon（M1/M2/M3/M4 及后续芯片），不提供 Intel（x86_64）版本。
 
 ## 下载与安装
 
@@ -18,7 +18,7 @@ Jaimo clip 是一个轻量、原生、本地优先的 macOS 剪贴板历史工�
 如需验证下载是否完整，将同一 Release 中的 `.dmg` 与 `.dmg.sha256` 放在同一目录后执行：
 
 ```bash
-shasum -a 256 -c Jaimo-clip-0.3.0-macOS-Apple-Silicon.dmg.sha256
+shasum -a 256 -c Jaimo-clip-0.3.1-macOS-Apple-Silicon.dmg.sha256
 ```
 
 ## 当前能力
@@ -28,6 +28,7 @@ shasum -a 256 -c Jaimo-clip-0.3.0-macOS-Apple-Silicon.dmg.sha256
 - 设置页和菜单栏支持检查更新；发现 GitHub Release 新版本后，可一键下载、校验、安装并自动重新启动
 - 使用 Carbon 注册全局 `⌥Space`，通过不激活原应用的浮动 `NSPanel` 展示历史
 - 支持搜索、全部/文字/图片/链接/收藏分类、键盘导航、复制回剪贴板、收藏和删除
+- 长文本预览按片段渐进渲染，首屏只排版开头内容，滚动到底部后继续加载后续片段
 - 连续相同内容按 SHA-256 去重；自身写回剪贴板产生的 change count 会被忽略
 - 历史上限为 500 条，超出后淘汰最旧的非收藏项，收藏项保留
 - SQLite 只保存元数据和图片路径；图片文件独立保存在本机 Application Support 目录
@@ -87,7 +88,7 @@ Jaimo clip 不上传剪贴板内容，不要求账户，也没有云同步。链
 
 - macOS 13 或更高版本
 - Apple Silicon Mac
-- 与当前 macOS SDK 匹配的 Xcode 或 Command Line Tools
+- 至少一个与当前 Swift 编译器兼容的 macOS SDK（Xcode 或 Command Line Tools 提供）
 - Swift 5.9 或更高版本
 
 构建并打开应用：
@@ -97,14 +98,12 @@ Jaimo clip 不上传剪贴板内容，不要求账户，也没有云同步。链
 open "build/Jaimo clip.app"
 ```
 
-构建脚本只使用 Swift Package Manager 和 macOS 系统框架，并在 `build/Jaimo clip.app` 生成一个临时签名的应用包。
+构建脚本只使用 Swift Package Manager 和 macOS 系统框架，并在 `build/Jaimo clip.app` 生成一个临时签名的应用包。脚本会先验证系统默认 SDK；如果 Command Line Tools 中的 Swift 编译器与默认 SDK 版本不一致，会自动选择机器上已安装的兼容 SDK。SDK 只决定编译时使用的系统接口，最低运行版本仍由 `arm64-apple-macosx13.0` 构建目标决定。
 
 运行开发期自检：
 
 ```bash
-CLANG_MODULE_CACHE_PATH="$PWD/.build/module-cache" \
-SWIFTPM_MODULECACHE_OVERRIDE="$PWD/.build/module-cache" \
-swift run --disable-sandbox ClipFlowSelfTest
+./Scripts/run-self-test.sh
 ```
 
 生成可下载的 macOS 安装镜像：
@@ -113,7 +112,7 @@ swift run --disable-sandbox ClipFlowSelfTest
 ./Scripts/package-dmg.sh
 ```
 
-安装包名称自动包含 `Resources/Info.plist` 中的当前版本号，例如 `dist/Jaimo-clip-0.3.0-macOS-Apple-Silicon.dmg`。配套的 `.sha256` 文件用于校验下载文件是否完整。
+安装包名称自动包含 `Resources/Info.plist` 中的当前版本号，例如 `dist/Jaimo-clip-0.3.1-macOS-Apple-Silicon.dmg`。配套的 `.sha256` 文件用于校验下载文件是否完整。
 
 如果更换了 `Resources/AppLogo.png`，重新生成 macOS 图标：
 

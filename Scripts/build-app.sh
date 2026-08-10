@@ -8,8 +8,10 @@ ARM_MODULE_CACHE="$PROJECT_DIR/.build/module-cache-arm64"
 ARM_BINARY="$PROJECT_DIR/.build/arm64-apple-macosx/release/ClipFlow"
 UPDATER_BINARY="$PROJECT_DIR/.build/arm64-apple-macosx/release/ClipFlowUpdater"
 SIGN_IDENTITY="${CLIPFLOW_SIGN_IDENTITY:--}"
+COMPATIBLE_SDK="${SDKROOT:-$("$PROJECT_DIR/Scripts/swift-sdk-path.sh")}"
 
 mkdir -p "$ARM_MODULE_CACHE"
+SDKROOT="$COMPATIBLE_SDK" \
 CLANG_MODULE_CACHE_PATH="$ARM_MODULE_CACHE" \
 SWIFTPM_MODULECACHE_OVERRIDE="$ARM_MODULE_CACHE" \
 swift build \
