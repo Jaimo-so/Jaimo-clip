@@ -88,7 +88,7 @@ Jaimo clip 不上传剪贴板内容，不要求账户，也没有云同步。链
 
 - macOS 13 或更高版本
 - Apple Silicon Mac
-- 与当前 macOS SDK 匹配的 Xcode 或 Command Line Tools
+- 至少一个与当前 Swift 编译器兼容的 macOS SDK（Xcode 或 Command Line Tools 提供）
 - Swift 5.9 或更高版本
 
 构建并打开应用：
@@ -98,14 +98,12 @@ Jaimo clip 不上传剪贴板内容，不要求账户，也没有云同步。链
 open "build/Jaimo clip.app"
 ```
 
-构建脚本只使用 Swift Package Manager 和 macOS 系统框架，并在 `build/Jaimo clip.app` 生成一个临时签名的应用包。
+构建脚本只使用 Swift Package Manager 和 macOS 系统框架，并在 `build/Jaimo clip.app` 生成一个临时签名的应用包。脚本会先验证系统默认 SDK；如果 Command Line Tools 中的 Swift 编译器与默认 SDK 版本不一致，会自动选择机器上已安装的兼容 SDK。SDK 只决定编译时使用的系统接口，最低运行版本仍由 `arm64-apple-macosx13.0` 构建目标决定。
 
 运行开发期自检：
 
 ```bash
-CLANG_MODULE_CACHE_PATH="$PWD/.build/module-cache" \
-SWIFTPM_MODULECACHE_OVERRIDE="$PWD/.build/module-cache" \
-swift run --disable-sandbox ClipFlowSelfTest
+./Scripts/run-self-test.sh
 ```
 
 生成可下载的 macOS 安装镜像：
