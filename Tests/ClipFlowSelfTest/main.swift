@@ -42,6 +42,27 @@ do {
         "单行普通文字分类失败"
     )
 
+    let longArticle = (0..<180)
+        .map { "第\($0)段：渐进渲染需要保留每一段文字及其定义与意义。" }
+        .joined(separator: "\n")
+    let articleChunks = TextChunker.chunks(from: longArticle, targetLength: 120, maximumLength: 160)
+    try require(articleChunks.count > 1, "长文章没有被分片")
+    try require(
+        articleChunks.map { $0.text + $0.trailingSeparator }.joined() == longArticle,
+        "文章分片后没有完整保留原文"
+    )
+    try require(
+        articleChunks.allSatisfy { $0.text.count <= 160 },
+        "文章分片超过最大长度"
+    )
+
+    let unbrokenText = String(repeating: "🙂", count: 360)
+    let unbrokenChunks = TextChunker.chunks(from: unbrokenText, targetLength: 90, maximumLength: 100)
+    try require(
+        unbrokenChunks.map { $0.text + $0.trailingSeparator }.joined() == unbrokenText,
+        "无换行长文本分片损坏了 Unicode 字符"
+    )
+
     try withStore { store in
         let clip = makeClip("same")
         try require(store.insert(clip) != nil, "首次插入失败")
@@ -98,7 +119,7 @@ do {
         "相同版本不应提示更新"
     )
 
-    print("Jaimo clip self-test passed: 10 checks")
+    print("Jaimo clip self-test passed: 14 checks")
 } catch {
     fputs("Jaimo clip self-test failed: \(error)\n", stderr)
     exit(1)
