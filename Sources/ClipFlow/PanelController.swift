@@ -136,6 +136,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         let command = flags.contains(.command)
         let shift = flags.contains(.shift)
 
+        // Jaimo clip is an LSUIElement app without a conventional Edit menu. AppKit normally
+        // routes these key equivalents through that menu, so explicitly forward them to the
+        // key panel's first responder. This keeps paste/cut/copy/select-all working in every
+        // SwiftUI TextField and TextEditor hosted by the nonactivating panel.
+        if command, routeStandardTextCommand(key) {
+            return true
+        }
+
         if command && key == "," {
             guard !model.promptEditorOpen,
                   !model.promptRunnerOpen,
@@ -257,6 +265,19 @@ final class PanelController: NSObject, NSWindowDelegate {
         default:
             return false
         }
+    }
+
+    private func routeStandardTextCommand(_ key: String) -> Bool {
+        let action: Selector
+        switch key {
+        case "a": action = #selector(NSText.selectAll(_:))
+        case "c": action = #selector(NSText.copy(_:))
+        case "v": action = #selector(NSText.paste(_:))
+        case "x": action = #selector(NSText.cut(_:))
+        default: return false
+        }
+        guard let responder = panel.firstResponder else { return false }
+        return responder.tryToPerform(action, with: nil)
     }
 
 }
