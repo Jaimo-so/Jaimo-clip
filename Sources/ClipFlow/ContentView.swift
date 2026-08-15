@@ -11,6 +11,10 @@ struct ContentView: View {
 
     var body: some View {
         let theme = ClipFlowTheme(scheme: colorScheme)
+        let modalOpen = model.settingsOpen
+            || model.promptEditorOpen
+            || model.promptRunnerOpen
+            || model.promptDeleteConfirmationOpen
         ZStack {
             if colorScheme == .dark {
                 VisualEffectBackground().ignoresSafeArea()
@@ -28,12 +32,30 @@ struct ContentView: View {
                 Divider().overlay(theme.hairline)
                 footer(theme)
             }
-            .disabled(model.settingsOpen)
+            .disabled(modalOpen)
 
             if model.settingsOpen {
                 SettingsView(model: model)
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.965)))
                     .zIndex(20)
+            }
+
+            if model.promptEditorOpen {
+                PromptEditorView(model: model)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.965)))
+                    .zIndex(22)
+            }
+
+            if model.promptRunnerOpen {
+                PromptRunnerView(model: model)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.965)))
+                    .zIndex(24)
+            }
+
+            if model.promptDeleteConfirmationOpen {
+                PromptDeleteConfirmationView(model: model)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.965)))
+                    .zIndex(26)
             }
 
             if let message = model.toastMessage {
@@ -49,6 +71,9 @@ struct ContentView: View {
                 .stroke((colorScheme == .dark ? Color.white : Color.black).opacity(0.18), lineWidth: 0.5)
         )
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.settingsOpen)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.promptEditorOpen)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.promptRunnerOpen)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.promptDeleteConfirmationOpen)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.toastMessage)
         .onReceive(NotificationCenter.default.publisher(for: .clipFlowFocusSearch)) { _ in
             searchFocused = true
@@ -62,17 +87,41 @@ struct ContentView: View {
 
     private func searchBar(_ theme: ClipFlowTheme) -> some View {
         HStack(spacing: 11) {
+            HStack(spacing: 2) {
+                ForEach(AppModel.LibraryMode.allCases) { mode in
+                    Button {
+                        model.setMode(mode)
+                    } label: {
+                        Text(mode.title)
+                            .font(.system(size: 11.5, weight: model.libraryMode == mode ? .semibold : .regular))
+                            .foregroundStyle(model.libraryMode == mode ? theme.foreground : theme.muted)
+                            .padding(.horizontal, 9)
+                            .frame(height: 26)
+                            .background(model.libraryMode == mode ? theme.chipHigh : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(model.libraryMode == mode ? [.isSelected] : [])
+                }
+            }
+            .padding(2)
+            .background(theme.chip)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 17, weight: .regular))
                 .foregroundStyle(theme.muted)
                 .accessibilityHidden(true)
-            TextField("搜索剪贴板历史…", text: $model.query)
+            TextField(
+                model.libraryMode == .history ? "搜索剪贴板历史…" : "搜索提示词…",
+                text: model.libraryMode == .history ? $model.query : $model.promptQuery
+            )
                 .textFieldStyle(.plain)
                 .font(.system(size: 15))
                 .foregroundStyle(theme.foreground)
                 .focused($searchFocused)
-                .accessibilityLabel("搜索剪贴板历史")
-                .accessibilityHint("输入关键词筛选剪贴板记录")
+                .accessibilityLabel(model.libraryMode == .history ? "搜索剪贴板历史" : "搜索提示词")
+                .accessibilityHint(model.libraryMode == .history ? "输入关键词筛选剪贴板记录" : "输入关键词筛选提示词")
             KeyCap(text: "⌘F", muted: true)
                 .accessibilityHidden(true)
         }
@@ -82,50 +131,102 @@ struct ContentView: View {
     }
 
     private func categoryBar(_ theme: ClipFlowTheme) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 3) {
-                ForEach(ClipFilter.allCases) { filter in
-                    Button {
-                        model.setFilter(filter)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text(filter.title)
-                                .font(.system(size: 12.5))
-                            Text("\(model.count(for: filter))")
-                                .font(.system(size: 11))
-                                .foregroundStyle(model.filter == filter ? theme.foregroundSecondary : theme.muted)
-                                .monospacedDigit()
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 3) {
+                    if model.libraryMode == .history {
+                        ForEach(ClipFilter.allCases) { filter in
+                            Button {
+                                model.setFilter(filter)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(filter.title).font(.system(size: 12.5))
+                                    Text("\(model.count(for: filter))")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(model.filter == filter ? theme.foregroundSecondary : theme.muted)
+                                        .monospacedDigit()
+                                }
+                                .foregroundStyle(model.filter == filter || hoveredTab == filter ? theme.foreground : theme.muted)
+                                .padding(.horizontal, 11)
+                                .frame(minHeight: 26)
+                                .background(model.filter == filter ? theme.chipHigh : hoveredTab == filter ? theme.chip : Color.clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 7))
+                            }
+                            .buttonStyle(.plain)
+                            .focusable(false)
+                            .onHover { hovering in hoveredTab = hovering ? filter : nil }
+                            .accessibilityLabel("\(filter.title)，\(model.count(for: filter)) 条")
+                            .accessibilityAddTraits(model.filter == filter ? [.isSelected] : [])
                         }
-                        .foregroundStyle(
-                            model.filter == filter || hoveredTab == filter ? theme.foreground : theme.muted
-                        )
-                        .padding(.horizontal, 11)
-                        .frame(minHeight: 26)
-                        .background(
-                            model.filter == filter
-                                ? theme.chipHigh
-                                : hoveredTab == filter ? theme.chip : Color.clear
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                    } else {
+                        ForEach(model.promptScopes) { scope in
+                            Button {
+                                model.setPromptScope(scope)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(scope.title).font(.system(size: 12.5))
+                                    Text("\(model.count(for: scope))")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(model.promptScope == scope ? theme.foregroundSecondary : theme.muted)
+                                        .monospacedDigit()
+                                }
+                                .foregroundStyle(model.promptScope == scope ? theme.foreground : theme.muted)
+                                .padding(.horizontal, 11)
+                                .frame(minHeight: 26)
+                                .background(model.promptScope == scope ? theme.chipHigh : Color.clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 7))
+                            }
+                            .buttonStyle(.plain)
+                            .focusable(false)
+                            .accessibilityLabel("\(scope.title)，\(model.count(for: scope)) 条提示词")
+                            .accessibilityAddTraits(model.promptScope == scope ? [.isSelected] : [])
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    .onHover { hovering in hoveredTab = hovering ? filter : nil }
-                    .accessibilityLabel("\(filter.title)，\(model.count(for: filter)) 条")
-                    .accessibilityAddTraits(model.filter == filter ? [.isSelected] : [])
                 }
+                .padding(.leading, 13)
+                .padding(.trailing, 8)
+                .padding(.vertical, 8)
             }
-            .padding(.horizontal, 13)
-            .padding(.vertical, 8)
+
+            if model.libraryMode == .prompts {
+                Divider()
+                    .overlay(theme.hairline)
+                    .frame(height: 25)
+                Button {
+                    model.beginCreatePrompt()
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10.5, weight: .semibold))
+                        Text("新建")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(theme.foreground)
+                    .padding(.horizontal, 10)
+                    .frame(height: 27)
+                    .background(theme.accent.opacity(0.20))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke(theme.accent.opacity(0.42), lineWidth: 0.5)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 10)
+                .help("新建提示词（⌘N）")
+                .accessibilityLabel("新建提示词")
+            }
         }
         .frame(height: 43)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("内容分类")
+        .accessibilityLabel(model.libraryMode == .history ? "内容分类" : "提示词分组")
     }
 
     private func bodyArea(_ theme: ClipFlowTheme) -> some View {
         GeometryReader { proxy in
-            if proxy.size.width <= 720 {
+            if model.libraryMode == .prompts {
+                PromptLibraryBody(model: model, compact: proxy.size.width <= 720)
+            } else if proxy.size.width <= 720 {
                 VStack(spacing: 0) {
                     HistoryListView(model: model)
                     Divider().overlay(theme.hairline)
@@ -149,10 +250,12 @@ struct ContentView: View {
             HStack(spacing: 12) {
                 HStack(spacing: 13) {
                     footerHint("↑↓", "导航")
-                    footerHint("↵", "复制")
-                    if proxy.size.width > 520 { footerHint("⌘S", "收藏") }
+                    footerHint("↵", model.libraryMode == .history ? "复制" : "使用")
+                    if proxy.size.width > 520 {
+                        footerHint("⌘S", "收藏")
+                    }
                     if proxy.size.width > 720 {
-                        footerHint("⌘⌫", "删除")
+                        footerHint(model.libraryMode == .history ? "⌘⌫" : "⌘N", model.libraryMode == .history ? "删除" : "新建")
                         footerHint("⌘,", "设置")
                     }
                 }
@@ -185,7 +288,10 @@ struct ContentView: View {
         switch model.phase {
         case .loading: return "加载中…"
         case .failed: return "读取失败"
-        case .ready: return "\(model.filteredItems.count) 条 · 本地存储"
+        case .ready:
+            return model.libraryMode == .history
+                ? "\(model.filteredItems.count) 条 · 本地存储"
+                : "\(model.filteredPrompts.count) 条提示词 · 本地存储"
         }
     }
 
@@ -475,6 +581,18 @@ private struct PreviewView: View {
             .disabled(model.selectedItem == nil)
             .accessibilityLabel(model.selectedItem?.isFavorite == true ? "取消收藏" : "收藏")
             .help(model.selectedItem?.isFavorite == true ? "取消收藏（⌘S）" : "收藏（⌘S）")
+
+            Button {
+                model.beginCreatePrompt(prefillFromSelection: true)
+            } label: {
+                Image(systemName: "text.badge.plus")
+                    .accessibilityHidden(true)
+            }
+            .buttonStyle(GlassButtonStyle(kind: .normal, horizontalPadding: 0))
+            .frame(width: 26, height: 26)
+            .disabled(model.selectedItem == nil || model.selectedItem?.kind == .image)
+            .accessibilityLabel("保存为提示词")
+            .help("保存为提示词")
 
             Button(action: model.deleteSelected) {
                 Image(systemName: "trash")

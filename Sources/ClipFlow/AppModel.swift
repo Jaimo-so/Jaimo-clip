@@ -10,19 +10,65 @@ final class AppModel: ObservableObject {
         case other
     }
 
+    enum LibraryMode: String, CaseIterable, Identifiable {
+        case history
+        case prompts
+
+        var id: String { rawValue }
+        var title: String { self == .history ? "历史" : "提示词" }
+    }
+
+    enum PromptScope: Hashable, Identifiable {
+        case all
+        case favorite
+        case group(String)
+
+        var id: String {
+            switch self {
+            case .all: return "all"
+            case .favorite: return "favorite"
+            case .group(let name): return "group:\(name)"
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .all: return "全部"
+            case .favorite: return "收藏"
+            case .group(let name): return name
+            }
+        }
+    }
+
     @Published private(set) var items: [ClipItem] = [] {
         didSet {
             itemsRevision &+= 1
             filteredCache = nil
         }
     }
+    @Published private(set) var prompts: [PromptItem] = []
     @Published var phase: ClipFlowPhase = .loading
+    @Published var libraryMode: LibraryMode = .history
     @Published var query = "" {
-        didSet { resetSelection() }
+        didSet { resetHistorySelection() }
+    }
+    @Published var promptQuery = "" {
+        didSet { resetPromptSelection() }
     }
     @Published var filter: ClipFilter = .all
+    @Published var promptScope: PromptScope = .all
     @Published var selectedID: Int64?
+    @Published var selectedPromptID: Int64?
     @Published var settingsOpen = false
+    @Published var promptEditorOpen = false
+    @Published var promptRunnerOpen = false
+    @Published var promptDeleteConfirmationOpen = false
+    @Published var editingPromptID: Int64?
+    @Published var promptDraftTitle = ""
+    @Published var promptDraftBody = ""
+    @Published var promptDraftGroup = "未分组"
+    @Published var promptDraftVariables: [PromptVariable] = []
+    @Published var promptVariableValues: [String: String] = [:]
     @Published var toastMessage: String?
     @Published var focusArea: FocusArea = .other
 
@@ -69,9 +115,61 @@ final class AppModel: ObservableObject {
         return result
     }
 
+    var filteredPrompts: [PromptItem] {
+        let needle = promptQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return prompts.filter { prompt in
+            let matchesScope: Bool
+            switch promptScope {
+            case .all: matchesScope = true
+            case .favorite: matchesScope = prompt.isFavorite
+            case .group(let name): matchesScope = prompt.groupName == name
+            }
+            guard matchesScope else { return false }
+            guard !needle.isEmpty else { return true }
+            return prompt.title.lowercased().contains(needle)
+                || prompt.body.lowercased().contains(needle)
+                || prompt.groupName.lowercased().contains(needle)
+        }
+    }
+
+    var promptGroups: [String] {
+        let available = Set(prompts.map(\.groupName))
+        let ordered = preferences.promptGroupOrder.filter(available.contains)
+        let orderedSet = Set(ordered)
+        let remaining = available.filter { !orderedSet.contains($0) }.sorted { lhs, rhs in
+            if lhs == "未分组" { return true }
+            if rhs == "未分组" { return false }
+            return lhs.localizedStandardCompare(rhs) == .orderedAscending
+        }
+        return ordered + remaining
+    }
+
+    var promptScopes: [PromptScope] {
+        [.all, .favorite] + promptGroups.map(PromptScope.group)
+    }
+
     var selectedItem: ClipItem? {
         guard let selectedID else { return filteredItems.first }
         return filteredItems.first { $0.id == selectedID }
+    }
+
+    var selectedPrompt: PromptItem? {
+        guard let selectedPromptID else { return filteredPrompts.first }
+        return filteredPrompts.first { $0.id == selectedPromptID }
+    }
+
+    var runnerPrompt: PromptItem? {
+        guard let selectedPromptID else { return nil }
+        return prompts.first { $0.id == selectedPromptID }
+    }
+
+    var hasMissingRequiredPromptVariables: Bool {
+        guard let prompt = runnerPrompt else { return true }
+        return prompt.variables.contains { variable in
+            variable.isRequired
+                && (promptVariableValues[variable.name] ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
     }
 
     func count(for filter: ClipFilter) -> Int {
@@ -84,6 +182,14 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func count(for scope: PromptScope) -> Int {
+        switch scope {
+        case .all: return prompts.count
+        case .favorite: return prompts.filter(\.isFavorite).count
+        case .group(let name): return prompts.filter { $0.groupName == name }.count
+        }
+    }
+
     func load() {
         let generation = UUID()
         loadGeneration = generation
@@ -93,11 +199,13 @@ final class AppModel: ObservableObject {
             do {
                 if self.store == nil { self.store = try SQLiteClipStore() }
                 self.items = try self.store?.loadAll() ?? []
+                self.prompts = try self.store?.loadPrompts() ?? []
                 self.phase = .ready
-                self.normalizeSelection()
+                self.normalizeHistorySelection()
+                self.normalizePromptSelection()
             } catch {
                 self.phase = .failed(error.localizedDescription)
-                self.announce("无法读取剪贴板历史")
+                self.announce("无法读取本地数据库")
             }
         }
     }
@@ -107,11 +215,18 @@ final class AppModel: ObservableObject {
         do {
             guard try store.insert(captured) != nil else { return }
             items = try store.loadAll()
-            normalizeSelection(preferFirst: true)
+            normalizeHistorySelection(preferFirst: true)
         } catch {
             phase = .failed(error.localizedDescription)
             announce("无法写入剪贴板历史")
         }
+    }
+
+    func setMode(_ mode: LibraryMode) {
+        libraryMode = mode
+        focusArea = .other
+        if mode == .history { normalizeHistorySelection(preferFirst: true) }
+        else { normalizePromptSelection(preferFirst: true) }
     }
 
     func setFilter(_ newFilter: ClipFilter) {
@@ -120,48 +235,84 @@ final class AppModel: ObservableObject {
         selectedID = filteredItems.first?.id
     }
 
+    func setPromptScope(_ scope: PromptScope) {
+        promptScope = scope
+        selectedPromptID = filteredPrompts.first?.id
+    }
+
+    func movePromptGroup(_ group: String, relativeTo target: String, after: Bool) {
+        guard group != target else { return }
+        var groups = promptGroups
+        guard let sourceIndex = groups.firstIndex(of: group) else { return }
+        let moved = groups.remove(at: sourceIndex)
+        guard let targetIndex = groups.firstIndex(of: target) else { return }
+        groups.insert(moved, at: targetIndex + (after ? 1 : 0))
+        preferences.setPromptGroupOrder(groups)
+        objectWillChange.send()
+    }
+
+    func movePromptGroup(_ group: String, by offset: Int) {
+        var groups = promptGroups
+        guard let sourceIndex = groups.firstIndex(of: group) else { return }
+        let destination = min(max(sourceIndex + offset, 0), groups.count - 1)
+        guard destination != sourceIndex else { return }
+        let moved = groups.remove(at: sourceIndex)
+        groups.insert(moved, at: destination)
+        preferences.setPromptGroupOrder(groups)
+        objectWillChange.send()
+    }
+
     func cycleFilter(_ offset: Int) {
-        let filters = ClipFilter.allCases
-        guard let current = filters.firstIndex(of: filter) else { return }
-        let next = (current + offset + filters.count) % filters.count
-        setFilter(filters[next])
+        if libraryMode == .history {
+            let filters = ClipFilter.allCases
+            guard let current = filters.firstIndex(of: filter) else { return }
+            setFilter(filters[(current + offset + filters.count) % filters.count])
+        } else {
+            let scopes = promptScopes
+            guard !scopes.isEmpty, let current = scopes.firstIndex(of: promptScope) else { return }
+            setPromptScope(scopes[(current + offset + scopes.count) % scopes.count])
+        }
     }
 
     func moveSelection(_ offset: Int) {
-        let visible = filteredItems
-        guard !visible.isEmpty else { return }
-        let current = visible.firstIndex { $0.id == selectedID } ?? 0
-        let next = min(max(0, current + offset), visible.count - 1)
-        selectedID = visible[next].id
+        if libraryMode == .history {
+            let visible = filteredItems
+            guard !visible.isEmpty else { return }
+            let current = visible.firstIndex { $0.id == selectedID } ?? 0
+            selectedID = visible[min(max(0, current + offset), visible.count - 1)].id
+        } else {
+            let visible = filteredPrompts
+            guard !visible.isEmpty else { return }
+            let current = visible.firstIndex { $0.id == selectedPromptID } ?? 0
+            selectedPromptID = visible[min(max(0, current + offset), visible.count - 1)].id
+        }
     }
 
     func copySelected() {
+        if libraryMode == .prompts {
+            useSelectedPrompt()
+            return
+        }
         guard case .ready = phase,
               let item = selectedItem,
               let clipboardMonitor else { return }
         switch clipboardMonitor.write(item) {
-        case .text(let count):
-            showToast("已复制到剪贴板 · \(count) 个字符")
-        case .image(let size):
-            showToast("已复制图片到剪贴板 · \(size)")
-        case .failure:
-            showToast("复制失败，请检查剪贴板权限")
-            return
-        }
-
-        if preferences.closeAfterCopy {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.onRequestClose?()
-            }
+        case .text(let count): finishCopy(message: "已复制到剪贴板 · \(count) 个字符")
+        case .image(let size): finishCopy(message: "已复制图片到剪贴板 · \(size)")
+        case .failure: showToast("复制失败，请检查剪贴板权限")
         }
     }
 
     func toggleFavorite() {
+        if libraryMode == .prompts {
+            togglePromptFavorite()
+            return
+        }
         guard case .ready = phase, let item = selectedItem, let store else { return }
         do {
             try store.setFavorite(id: item.id, isFavorite: !item.isFavorite)
             items = try store.loadAll()
-            normalizeSelection()
+            normalizeHistorySelection()
             showToast(item.isFavorite ? "已取消收藏" : "已加入收藏")
         } catch {
             showToast("收藏状态更新失败")
@@ -169,6 +320,11 @@ final class AppModel: ObservableObject {
     }
 
     func deleteSelected() {
+        if libraryMode == .prompts {
+            guard selectedPrompt != nil else { return }
+            promptDeleteConfirmationOpen = true
+            return
+        }
         guard case .ready = phase, let item = selectedItem, let store else { return }
         let current = filteredItems.firstIndex { $0.id == item.id } ?? 0
         do {
@@ -176,32 +332,125 @@ final class AppModel: ObservableObject {
             items = try store.loadAll()
             let visible = filteredItems
             selectedID = visible.isEmpty ? nil : visible[min(current, visible.count - 1)].id
-            let shortTitle = item.title.count > 14 ? String(item.title.prefix(14)) + "…" : item.title
-            showToast("已删除「\(shortTitle)」")
+            showToast("已删除「\(shortTitle(item.title))」")
         } catch {
             showToast("删除失败")
         }
     }
 
+    func beginCreatePrompt(prefillFromSelection: Bool = false) {
+        editingPromptID = nil
+        let source = prefillFromSelection ? selectedItem : nil
+        let body = source?.fullText ?? source?.title ?? ""
+        promptDraftTitle = body.isEmpty ? "" : Self.suggestedPromptTitle(from: body)
+        promptDraftBody = body
+        promptDraftGroup = promptGroups.first ?? "未分组"
+        promptDraftVariables = PromptTemplate.variables(in: body)
+        promptEditorOpen = true
+    }
+
+    func beginEditSelectedPrompt() {
+        guard let prompt = selectedPrompt else { return }
+        editingPromptID = prompt.id
+        promptDraftTitle = prompt.title
+        promptDraftBody = prompt.body
+        promptDraftGroup = prompt.groupName
+        promptDraftVariables = prompt.variables
+        promptEditorOpen = true
+    }
+
+    func syncDraftVariables() {
+        promptDraftVariables = PromptTemplate.variables(
+            in: promptDraftBody,
+            preserving: promptDraftVariables
+        )
+    }
+
+    func savePromptDraft() {
+        let title = promptDraftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = promptDraftBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        let group = promptDraftGroup.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, !body.isEmpty else {
+            showToast("标题和提示词正文不能为空")
+            return
+        }
+        guard let store else { return }
+        syncDraftVariables()
+        do {
+            if let editingPromptID {
+                try store.updatePrompt(
+                    id: editingPromptID,
+                    title: title,
+                    body: body,
+                    groupName: group.isEmpty ? "未分组" : group,
+                    variables: promptDraftVariables
+                )
+                showToast("提示词已更新")
+                selectedPromptID = editingPromptID
+            } else {
+                let prompt = try store.createPrompt(
+                    title: title,
+                    body: body,
+                    groupName: group.isEmpty ? "未分组" : group,
+                    variables: promptDraftVariables
+                )
+                selectedPromptID = prompt.id
+                showToast("提示词已保存")
+            }
+            prompts = try store.loadPrompts()
+            libraryMode = .prompts
+            promptScope = .all
+            promptEditorOpen = false
+            normalizePromptSelection()
+        } catch {
+            showToast("提示词保存失败")
+        }
+    }
+
+    func useSelectedPrompt() {
+        guard let prompt = selectedPrompt else { return }
+        if prompt.variables.isEmpty {
+            copyPrompt(prompt, values: [:])
+        } else {
+            promptVariableValues = Dictionary(
+                uniqueKeysWithValues: prompt.variables.map { ($0.name, $0.defaultValue) }
+            )
+            promptRunnerOpen = true
+        }
+    }
+
+    func copyRenderedPrompt() {
+        guard let prompt = runnerPrompt, !hasMissingRequiredPromptVariables else {
+            showToast("请填写所有必填变量")
+            return
+        }
+        copyPrompt(prompt, values: promptVariableValues)
+        promptRunnerOpen = false
+    }
+
+    func confirmDeletePrompt() {
+        guard let prompt = selectedPrompt, let store else { return }
+        let current = filteredPrompts.firstIndex { $0.id == prompt.id } ?? 0
+        do {
+            try store.deletePrompt(id: prompt.id)
+            prompts = try store.loadPrompts()
+            let visible = filteredPrompts
+            selectedPromptID = visible.isEmpty ? nil : visible[min(current, visible.count - 1)].id
+            promptDeleteConfirmationOpen = false
+            showToast("已删除提示词「\(shortTitle(prompt.title))」")
+        } catch {
+            showToast("提示词删除失败")
+        }
+    }
+
     @discardableResult
     func clearHistory() -> Int {
-        let currentCount = items.count
+        guard let store else {
+            showToast("清空失败，请重试")
+            return 0
+        }
         do {
-            let deleted: Int
-            if let store {
-                do {
-                    deleted = try store.clear()
-                } catch {
-                    self.store = nil
-                    try SQLiteClipStore.resetDefaultStorage()
-                    self.store = try SQLiteClipStore()
-                    deleted = currentCount
-                }
-            } else {
-                try SQLiteClipStore.resetDefaultStorage()
-                store = try SQLiteClipStore()
-                deleted = currentCount
-            }
+            let deleted = try store.clear()
             items = []
             selectedID = nil
             phase = .ready
@@ -223,6 +472,49 @@ final class AppModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
     }
 
+    func prepareForPresentation() {
+        if libraryMode == .history { selectedID = filteredItems.first?.id }
+        else { selectedPromptID = filteredPrompts.first?.id }
+    }
+
+    private func togglePromptFavorite() {
+        guard let prompt = selectedPrompt, let store else { return }
+        do {
+            try store.setPromptFavorite(id: prompt.id, isFavorite: !prompt.isFavorite)
+            prompts = try store.loadPrompts()
+            normalizePromptSelection()
+            showToast(prompt.isFavorite ? "已取消收藏" : "已加入收藏")
+        } catch {
+            showToast("收藏状态更新失败")
+        }
+    }
+
+    private func copyPrompt(_ prompt: PromptItem, values: [String: String]) {
+        guard let clipboardMonitor else { return }
+        let rendered = PromptTemplate.render(prompt.body, values: values)
+        switch clipboardMonitor.write(text: rendered) {
+        case .text(let count):
+            do {
+                try store?.markPromptUsed(id: prompt.id)
+                prompts = try store?.loadPrompts() ?? prompts
+            } catch { }
+            finishCopy(message: "已复制提示词 · \(count) 个字符")
+        case .image:
+            break
+        case .failure:
+            showToast("复制失败，请检查剪贴板权限")
+        }
+    }
+
+    private func finishCopy(message: String) {
+        showToast(message)
+        if preferences.closeAfterCopy {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.onRequestClose?()
+            }
+        }
+    }
+
     private func announce(_ message: String) {
         NSAccessibility.post(
             element: NSApp as Any,
@@ -234,16 +526,16 @@ final class AppModel: ObservableObject {
         )
     }
 
-    func prepareForPresentation() {
-        selectedID = filteredItems.first?.id
-    }
-
-    private func resetSelection() {
+    private func resetHistorySelection() {
         filteredCache = nil
         selectedID = filteredItems.first?.id
     }
 
-    private func normalizeSelection(preferFirst: Bool = false) {
+    private func resetPromptSelection() {
+        selectedPromptID = filteredPrompts.first?.id
+    }
+
+    private func normalizeHistorySelection(preferFirst: Bool = false) {
         let visible = filteredItems
         guard !visible.isEmpty else {
             selectedID = nil
@@ -254,4 +546,24 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func normalizePromptSelection(preferFirst: Bool = false) {
+        let visible = filteredPrompts
+        guard !visible.isEmpty else {
+            selectedPromptID = nil
+            return
+        }
+        if preferFirst || !visible.contains(where: { $0.id == selectedPromptID }) {
+            selectedPromptID = visible.first?.id
+        }
+    }
+
+    private func shortTitle(_ title: String) -> String {
+        title.count > 14 ? String(title.prefix(14)) + "…" : title
+    }
+
+    private static func suggestedPromptTitle(from body: String) -> String {
+        let firstLine = body.split(whereSeparator: \.isNewline).first.map(String.init) ?? body
+        let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.count > 30 ? String(trimmed.prefix(30)) + "…" : trimmed
+    }
 }

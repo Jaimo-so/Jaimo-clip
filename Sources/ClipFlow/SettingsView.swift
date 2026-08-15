@@ -252,9 +252,9 @@ struct SettingsView: View {
 
     private var clearHint: String {
         if clearArmed {
-            return "将永久删除全部 \(model.items.count) 条记录（含收藏）。8 秒内未确认将自动取消。"
+            return "将永久删除全部 \(model.items.count) 条历史记录（含收藏），不会删除提示词。8 秒内未确认将自动取消。"
         }
-        return "此操作不可撤销，收藏的记录也会一并删除。点击后需再次确认。"
+        return "此操作不可撤销，历史收藏也会一并删除，但提示词库会保留。点击后需再次确认。"
     }
 
     private func settingsGroup<Content: View>(

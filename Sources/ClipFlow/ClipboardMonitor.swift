@@ -69,6 +69,14 @@ final class ClipboardMonitor {
         return .text(characterCount: (item.fullText ?? item.title).count)
     }
 
+    func write(text: String) -> WriteResult {
+        pasteboard.clearContents()
+        guard pasteboard.setString(text, forType: .string) else { return .failure }
+        ignoredChangeCount = pasteboard.changeCount
+        lastChangeCount = pasteboard.changeCount
+        return .text(characterCount: text.count)
+    }
+
     private func poll() {
         let currentChangeCount = pasteboard.changeCount
         guard currentChangeCount != lastChangeCount else { return }

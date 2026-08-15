@@ -220,6 +220,127 @@ public final class SQLiteClipStore {
         return Int(sqlite3_column_int64(statement, 0))
     }
 
+    public func loadPrompts() throws -> [PromptItem] {
+        let statement = try prepare("""
+        SELECT id, title, body, groupName, isFavorite, variables, createdAt,
+               updatedAt, lastUsedAt, useCount
+        FROM prompts
+        ORDER BY isFavorite DESC, COALESCE(lastUsedAt, updatedAt) DESC, id DESC;
+        """)
+        defer { sqlite3_finalize(statement) }
+
+        var prompts: [PromptItem] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            prompts.append(try decodePrompt(statement))
+        }
+        return prompts
+    }
+
+    @discardableResult
+    public func createPrompt(
+        title: String,
+        body: String,
+        groupName: String,
+        variables: [PromptVariable],
+        isFavorite: Bool = false,
+        date: Date = Date()
+    ) throws -> PromptItem {
+        let statement = try prepare("""
+        INSERT INTO prompts (
+            title, body, groupName, isFavorite, variables, createdAt, updatedAt,
+            lastUsedAt, useCount
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0);
+        """)
+        defer { sqlite3_finalize(statement) }
+
+        try bind(title, to: statement, at: 1)
+        try bind(body, to: statement, at: 2)
+        try bind(groupName, to: statement, at: 3)
+        sqlite3_bind_int(statement, 4, isFavorite ? 1 : 0)
+        try bind(try encodeVariables(variables), to: statement, at: 5)
+        sqlite3_bind_double(statement, 6, date.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 7, date.timeIntervalSince1970)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ClipStoreError.execute(databaseMessage)
+        }
+
+        return PromptItem(
+            id: sqlite3_last_insert_rowid(database),
+            title: title,
+            body: body,
+            groupName: groupName,
+            isFavorite: isFavorite,
+            variables: variables,
+            createdAt: date,
+            updatedAt: date
+        )
+    }
+
+    public func updatePrompt(
+        id: Int64,
+        title: String,
+        body: String,
+        groupName: String,
+        variables: [PromptVariable],
+        date: Date = Date()
+    ) throws {
+        let statement = try prepare("""
+        UPDATE prompts
+        SET title = ?, body = ?, groupName = ?, variables = ?, updatedAt = ?
+        WHERE id = ?;
+        """)
+        defer { sqlite3_finalize(statement) }
+
+        try bind(title, to: statement, at: 1)
+        try bind(body, to: statement, at: 2)
+        try bind(groupName, to: statement, at: 3)
+        try bind(try encodeVariables(variables), to: statement, at: 4)
+        sqlite3_bind_double(statement, 5, date.timeIntervalSince1970)
+        sqlite3_bind_int64(statement, 6, id)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ClipStoreError.execute(databaseMessage)
+        }
+    }
+
+    public func setPromptFavorite(id: Int64, isFavorite: Bool) throws {
+        let statement = try prepare("UPDATE prompts SET isFavorite = ?, updatedAt = ? WHERE id = ?;")
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int(statement, 1, isFavorite ? 1 : 0)
+        sqlite3_bind_double(statement, 2, Date().timeIntervalSince1970)
+        sqlite3_bind_int64(statement, 3, id)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ClipStoreError.execute(databaseMessage)
+        }
+    }
+
+    public func markPromptUsed(id: Int64, date: Date = Date()) throws {
+        let statement = try prepare("""
+        UPDATE prompts SET lastUsedAt = ?, useCount = useCount + 1 WHERE id = ?;
+        """)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, date.timeIntervalSince1970)
+        sqlite3_bind_int64(statement, 2, id)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ClipStoreError.execute(databaseMessage)
+        }
+    }
+
+    public func deletePrompt(id: Int64) throws {
+        let statement = try prepare("DELETE FROM prompts WHERE id = ?;")
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int64(statement, 1, id)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ClipStoreError.execute(databaseMessage)
+        }
+    }
+
+    public func promptCount() throws -> Int {
+        let statement = try prepare("SELECT COUNT(*) FROM prompts;")
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int64(statement, 0))
+    }
+
     private func migrate() throws {
         try execute("""
         CREATE TABLE IF NOT EXISTS clips (
@@ -241,6 +362,23 @@ public final class SQLiteClipStore {
         try execute("CREATE INDEX IF NOT EXISTS clips_copiedAt ON clips(copiedAt DESC);")
         try execute("CREATE INDEX IF NOT EXISTS clips_category ON clips(category);")
         try execute("CREATE INDEX IF NOT EXISTS clips_favorite ON clips(isFavorite);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS prompts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            groupName TEXT NOT NULL DEFAULT '未分组',
+            isFavorite INTEGER NOT NULL DEFAULT 0,
+            variables TEXT NOT NULL DEFAULT '[]',
+            createdAt REAL NOT NULL,
+            updatedAt REAL NOT NULL,
+            lastUsedAt REAL,
+            useCount INTEGER NOT NULL DEFAULT 0
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS prompts_updatedAt ON prompts(updatedAt DESC);")
+        try execute("CREATE INDEX IF NOT EXISTS prompts_groupName ON prompts(groupName);")
+        try execute("CREATE INDEX IF NOT EXISTS prompts_favorite ON prompts(isFavorite);")
     }
 
     private func enforceLimit(_ limit: Int) throws {
@@ -330,6 +468,42 @@ public final class SQLiteClipStore {
             meta: meta,
             contentHash: string(statement, column: 12)
         )
+    }
+
+    private func decodePrompt(_ statement: OpaquePointer?) throws -> PromptItem {
+        let variablesJSON = string(statement, column: 5)
+        guard let variablesData = variablesJSON.data(using: .utf8) else {
+            throw ClipStoreError.decode("提示词变量编码无效")
+        }
+        let variables: [PromptVariable]
+        do {
+            variables = try decoder.decode([PromptVariable].self, from: variablesData)
+        } catch {
+            throw ClipStoreError.decode("提示词变量无法解析：\(error.localizedDescription)")
+        }
+
+        let lastUsedAt: Date?
+        if sqlite3_column_type(statement, 8) == SQLITE_NULL {
+            lastUsedAt = nil
+        } else {
+            lastUsedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 8))
+        }
+        return PromptItem(
+            id: sqlite3_column_int64(statement, 0),
+            title: string(statement, column: 1),
+            body: string(statement, column: 2),
+            groupName: string(statement, column: 3),
+            isFavorite: sqlite3_column_int(statement, 4) != 0,
+            variables: variables,
+            createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 6)),
+            updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 7)),
+            lastUsedAt: lastUsedAt,
+            useCount: Int(sqlite3_column_int64(statement, 9))
+        )
+    }
+
+    private func encodeVariables(_ variables: [PromptVariable]) throws -> String {
+        String(decoding: try encoder.encode(variables), as: UTF8.self)
     }
 
     private func execute(_ sql: String) throws {
