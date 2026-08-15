@@ -4,7 +4,7 @@
 
 Jaimo clip 是一个轻量、原生、本地优先的 macOS 剪贴板历史工具。当前实现以 `clipflow-app.html` 为唯一视觉真源，以 `clipflow-handoff-spec.md` 为实现契约；不包含 Electron、WebView、账户、云同步或 AI 运行时。
 
-> 当前公开版本：`0.4.0`。仅支持 Apple Silicon（M1/M2/M3/M4 及后续芯片），不提供 Intel（x86_64）版本。
+> 当前公开版本：`0.4.1`。仅支持 Apple Silicon（M1/M2/M3/M4 及后续芯片），不提供 Intel（x86_64）版本。
 
 ## 下载与安装
 
@@ -18,7 +18,7 @@ Jaimo clip 是一个轻量、原生、本地优先的 macOS 剪贴板历史工�
 如需验证下载是否完整，将同一 Release 中的 `.dmg` 与 `.dmg.sha256` 放在同一目录后执行：
 
 ```bash
-shasum -a 256 -c Jaimo-clip-0.4.0-macOS-Apple-Silicon.dmg.sha256
+shasum -a 256 -c Jaimo-clip-0.4.1-macOS-Apple-Silicon.dmg.sha256
 ```
 
 ## 当前能力
@@ -117,7 +117,7 @@ open "build/Jaimo clip.app"
 ./Scripts/package-dmg.sh
 ```
 
-安装包名称自动包含 `Resources/Info.plist` 中的当前版本号，例如 `dist/Jaimo-clip-0.4.0-macOS-Apple-Silicon.dmg`。配套的 `.sha256` 文件用于校验下载文件是否完整。
+安装包名称自动包含 `Resources/Info.plist` 中的当前版本号，例如 `dist/Jaimo-clip-0.4.1-macOS-Apple-Silicon.dmg`。配套的 `.sha256` 文件用于校验下载文件是否完整。
 
 如果更换了 `Resources/AppLogo.png`，重新生成 macOS 图标：
 
