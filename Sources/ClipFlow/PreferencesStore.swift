@@ -12,6 +12,7 @@ final class PreferencesStore: ObservableObject {
     private enum Key {
         static let closeAfterCopy = "closeAfterCopy"
         static let excludedApps = "excludedApps"
+        static let promptGroupOrder = "promptGroupOrder"
     }
 
     static let defaultExcludedApps = [
@@ -28,12 +29,17 @@ final class PreferencesStore: ObservableObject {
         didSet { persistExcludedApps() }
     }
 
+    @Published private(set) var promptGroupOrder: [String] {
+        didSet { defaults.set(promptGroupOrder, forKey: Key.promptGroupOrder) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         defaults.register(defaults: [Key.closeAfterCopy: true])
         closeAfterCopy = defaults.bool(forKey: Key.closeAfterCopy)
+        promptGroupOrder = defaults.stringArray(forKey: Key.promptGroupOrder) ?? []
 
         if let data = defaults.data(forKey: Key.excludedApps),
            let decoded = try? JSONDecoder().decode([ExcludedApp].self, from: data) {
@@ -62,6 +68,10 @@ final class PreferencesStore: ObservableObject {
 
     func removeExcludedApp(_ app: ExcludedApp) {
         excludedApps.removeAll { $0.bundleID == app.bundleID }
+    }
+
+    func setPromptGroupOrder(_ groups: [String]) {
+        promptGroupOrder = groups
     }
 
     func isExcluded(bundleID: String) -> Bool {

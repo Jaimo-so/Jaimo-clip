@@ -83,6 +83,51 @@ do {
         try require(items.first(where: { $0.id == first.id })?.isFavorite == true, "收藏项没有保留")
     }
 
+    let promptBody = "请用{{语气}}向{{受众}}解释：{{内容}}。再次强调：{{语气}}。"
+    try require(
+        PromptTemplate.variableNames(in: promptBody) == ["语气", "受众", "内容"],
+        "提示词变量没有按首次出现顺序去重"
+    )
+    try require(
+        PromptTemplate.render(
+            promptBody,
+            values: ["语气": "简洁", "受众": "新用户", "内容": "本地存储"]
+        ) == "请用简洁向新用户解释：本地存储。再次强调：简洁。",
+        "提示词变量渲染失败"
+    )
+
+    try withStore { store in
+        _ = try store.insert(makeClip("history"))
+        let created = try store.createPrompt(
+            title: "解释概念",
+            body: promptBody,
+            groupName: "写作",
+            variables: PromptTemplate.variables(in: promptBody)
+        )
+        try require(try store.promptCount() == 1, "提示词没有写入独立数据表")
+        try require(try store.clear() == 1, "清空历史返回的数量错误")
+        try require(try store.promptCount() == 1, "清空历史误删了提示词")
+
+        try store.updatePrompt(
+            id: created.id,
+            title: "解释复杂概念",
+            body: "向{{对象}}解释{{主题}}",
+            groupName: "产品",
+            variables: PromptTemplate.variables(in: "向{{对象}}解释{{主题}}")
+        )
+        try store.setPromptFavorite(id: created.id, isFavorite: true)
+        try store.markPromptUsed(id: created.id, date: Date(timeIntervalSince1970: 100))
+        guard let updated = try store.loadPrompts().first else {
+            throw SelfTestError.failed("无法读取更新后的提示词")
+        }
+        try require(updated.title == "解释复杂概念", "提示词更新失败")
+        try require(updated.groupName == "产品" && updated.variables.count == 2, "提示词分组或变量更新失败")
+        try require(updated.isFavorite && updated.useCount == 1, "提示词收藏或使用次数更新失败")
+
+        try store.deletePrompt(id: created.id)
+        try require(try store.promptCount() == 0, "提示词删除失败")
+    }
+
     try require(
         AppVersion("v0.1.2")! > AppVersion("0.1.1")!,
         "更新版本比较失败"
@@ -119,7 +164,7 @@ do {
         "相同版本不应提示更新"
     )
 
-    print("Jaimo clip self-test passed: 14 checks")
+    print("Jaimo clip self-test passed: 23 checks")
 } catch {
     fputs("Jaimo clip self-test failed: \(error)\n", stderr)
     exit(1)

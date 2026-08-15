@@ -4,7 +4,7 @@
 
 Jaimo clip 是一个轻量、原生、本地优先的 macOS 剪贴板历史工具。当前实现以 `clipflow-app.html` 为唯一视觉真源，以 `clipflow-handoff-spec.md` 为实现契约；不包含 Electron、WebView、账户、云同步或 AI 运行时。
 
-> 当前公开版本：`0.3.1`。仅支持 Apple Silicon（M1/M2/M3/M4 及后续芯片），不提供 Intel（x86_64）版本。
+> 当前公开版本：`0.4.0`。仅支持 Apple Silicon（M1/M2/M3/M4 及后续芯片），不提供 Intel（x86_64）版本。
 
 ## 下载与安装
 
@@ -18,7 +18,7 @@ Jaimo clip 是一个轻量、原生、本地优先的 macOS 剪贴板历史工�
 如需验证下载是否完整，将同一 Release 中的 `.dmg` 与 `.dmg.sha256` 放在同一目录后执行：
 
 ```bash
-shasum -a 256 -c Jaimo-clip-0.3.1-macOS-Apple-Silicon.dmg.sha256
+shasum -a 256 -c Jaimo-clip-0.4.0-macOS-Apple-Silicon.dmg.sha256
 ```
 
 ## 当前能力
@@ -28,6 +28,8 @@ shasum -a 256 -c Jaimo-clip-0.3.1-macOS-Apple-Silicon.dmg.sha256
 - 设置页和菜单栏支持检查更新；发现 GitHub Release 新版本后，可一键下载、校验、安装并自动重新启动
 - 使用 Carbon 注册全局 `⌥Space`，通过不激活原应用的浮动 `NSPanel` 展示历史
 - 支持搜索、全部/文字/图片/链接/收藏分类、键盘导航、复制回剪贴板、收藏和删除
+- 内置独立的本地提示词库，支持分组、搜索、收藏、新建、编辑、删除和使用次数记录
+- 可将文字、代码或链接历史保存为提示词；使用 `{{变量名}}` 定义调用时填写的模板变量
 - 长文本预览按片段渐进渲染，首屏只排版开头内容，滚动到底部后继续加载后续片段
 - 连续相同内容按 SHA-256 去重；自身写回剪贴板产生的 change count 会被忽略
 - 历史上限为 500 条，超出后淘汰最旧的非收藏项，收藏项保留
@@ -46,6 +48,9 @@ shasum -a 256 -c Jaimo-clip-0.3.1-macOS-Apple-Silicon.dmg.sha256
 - `↑` / `↓`：移动选中项
 - `↵`：复制选中项到系统剪贴板
 - `⌘F`：聚焦搜索
+- `⌘1` / `⌘2`：切换剪贴板历史 / 提示词库
+- `⌘N`：新建提示词
+- `⌘E`：编辑选中的提示词
 - `⌘S`：切换收藏
 - `⌘⌫`：删除选中项
 - `⌘,`：打开或关闭偏好设置
@@ -61,11 +66,11 @@ Jaimo clip 不上传剪贴板内容，不要求账户，也没有云同步。链
 
 ```text
 ~/Library/Application Support/ClipFlow/
-├── ClipFlow.sqlite3
+├── ClipFlow.sqlite3      # 剪贴板历史与独立的提示词表
 └── Images/
 ```
 
-删除应用不会自动删除上述历史数据。如需彻底移除本机记录，可先在偏好设置中清空历史，再退出并删除该目录。
+删除应用不会自动删除上述本地数据。偏好设置中的“清空历史”只删除剪贴板历史，不会删除提示词库；如需彻底移除全部数据，需要退出应用后删除该目录。
 
 ## 应用内更新
 
@@ -112,7 +117,7 @@ open "build/Jaimo clip.app"
 ./Scripts/package-dmg.sh
 ```
 
-安装包名称自动包含 `Resources/Info.plist` 中的当前版本号，例如 `dist/Jaimo-clip-0.3.1-macOS-Apple-Silicon.dmg`。配套的 `.sha256` 文件用于校验下载文件是否完整。
+安装包名称自动包含 `Resources/Info.plist` 中的当前版本号，例如 `dist/Jaimo-clip-0.4.0-macOS-Apple-Silicon.dmg`。配套的 `.sha256` 文件用于校验下载文件是否完整。
 
 如果更换了 `Resources/AppLogo.png`，重新生成 macOS 图标：
 

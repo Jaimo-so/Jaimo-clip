@@ -137,8 +137,39 @@ final class PanelController: NSObject, NSWindowDelegate {
         let shift = flags.contains(.shift)
 
         if command && key == "," {
+            guard !model.promptEditorOpen,
+                  !model.promptRunnerOpen,
+                  !model.promptDeleteConfirmationOpen else { return true }
             model.settingsOpen.toggle()
             return true
+        }
+
+        if model.promptDeleteConfirmationOpen {
+            if keyCode == UInt16(kVK_Escape) {
+                model.promptDeleteConfirmationOpen = false
+                return true
+            }
+            return false
+        }
+
+        if model.promptRunnerOpen {
+            if keyCode == UInt16(kVK_Escape) {
+                model.promptRunnerOpen = false
+                return true
+            }
+            return false
+        }
+
+        if model.promptEditorOpen {
+            if keyCode == UInt16(kVK_Escape) {
+                model.promptEditorOpen = false
+                return true
+            }
+            if command && key == "s" {
+                model.savePromptDraft()
+                return true
+            }
+            return false
         }
 
         if model.settingsOpen {
@@ -157,9 +188,34 @@ final class PanelController: NSObject, NSWindowDelegate {
             return true
         }
 
+        if command && key == "1" {
+            model.setMode(.history)
+            return true
+        }
+        if command && key == "2" {
+            model.setMode(.prompts)
+            return true
+        }
+
+        if command && key == "n" {
+            model.setMode(.prompts)
+            model.beginCreatePrompt()
+            return true
+        }
+
+        if command && key == "e", model.libraryMode == .prompts {
+            model.beginEditSelectedPrompt()
+            return true
+        }
+
         if keyCode == UInt16(kVK_Escape) {
-            if model.query.isEmpty { hide() }
-            else { model.query = "" }
+            if model.libraryMode == .history {
+                if model.query.isEmpty { hide() }
+                else { model.query = "" }
+            } else {
+                if model.promptQuery.isEmpty { hide() }
+                else { model.promptQuery = "" }
+            }
             return true
         }
 
@@ -188,10 +244,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             model.cycleFilter(1)
             return true
         case UInt16(kVK_Home) where model.focusArea == .tabs:
-            model.setFilter(.all)
+            if model.libraryMode == .history { model.setFilter(.all) }
+            else { model.setPromptScope(.all) }
             return true
         case UInt16(kVK_End) where model.focusArea == .tabs:
-            model.setFilter(.favorite)
+            if model.libraryMode == .history { model.setFilter(.favorite) }
+            else if let last = model.promptScopes.last { model.setPromptScope(last) }
             return true
         case UInt16(kVK_Tab) where model.focusArea == .other:
             model.cycleFilter(shift ? -1 : 1)
