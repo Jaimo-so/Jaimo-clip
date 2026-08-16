@@ -23,6 +23,7 @@ public struct PromptItem: Identifiable, Hashable, Sendable {
     public var updatedAt: Date
     public var lastUsedAt: Date?
     public var useCount: Int
+    public var sortOrder: Int
 
     public init(
         id: Int64 = 0,
@@ -34,7 +35,8 @@ public struct PromptItem: Identifiable, Hashable, Sendable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         lastUsedAt: Date? = nil,
-        useCount: Int = 0
+        useCount: Int = 0,
+        sortOrder: Int = 0
     ) {
         self.id = id
         self.title = title
@@ -46,6 +48,7 @@ public struct PromptItem: Identifiable, Hashable, Sendable {
         self.updatedAt = updatedAt
         self.lastUsedAt = lastUsedAt
         self.useCount = useCount
+        self.sortOrder = sortOrder
     }
 }
 

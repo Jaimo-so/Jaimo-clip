@@ -29,6 +29,8 @@ struct PromptLibraryBody: View {
 
 private struct PromptListView: View {
     @ObservedObject var model: AppModel
+    @State private var draggedPromptID: Int64?
+    @State private var dropTargetPromptID: Int64?
 
     var body: some View {
         Group {
@@ -55,12 +57,26 @@ private struct PromptListView: View {
                                 ForEach(model.filteredPrompts) { prompt in
                                     PromptRow(
                                         prompt: prompt,
-                                        selected: model.selectedPromptID == prompt.id
+                                        selected: model.selectedPromptID == prompt.id,
+                                        dropTarget: dropTargetPromptID == prompt.id,
+                                        dragProvider: {
+                                            draggedPromptID = prompt.id
+                                            return NSItemProvider(object: "prompt:\(prompt.id)" as NSString)
+                                        }
                                     ) {
                                         model.selectedPromptID = prompt.id
                                         model.focusArea = .other
                                     }
                                     .id(prompt.id)
+                                    .onDrop(
+                                        of: [UTType.text],
+                                        delegate: PromptRowDropDelegate(
+                                            targetPromptID: prompt.id,
+                                            draggedPromptID: $draggedPromptID,
+                                            dropTargetPromptID: $dropTargetPromptID,
+                                            move: model.movePrompt
+                                        )
+                                    )
                                     .contextMenu {
                                         Button("使用提示词") {
                                             model.selectedPromptID = prompt.id
@@ -125,13 +141,15 @@ private struct PromptListView: View {
 private struct PromptRow: View {
     let prompt: PromptItem
     let selected: Bool
+    let dropTarget: Bool
+    let dragProvider: () -> NSItemProvider
     let action: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     @State private var hovering = false
 
     var body: some View {
         let theme = ClipFlowTheme(scheme: colorScheme)
-        Button(action: action) {
+        HStack(spacing: 0) {
             HStack(spacing: 11) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 15))
@@ -169,27 +187,83 @@ private struct PromptRow: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 8)
-            .background(selected ? theme.selection : hovering ? theme.chip : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: 7))
-            .overlay(alignment: .leading) {
-                if selected {
-                    Capsule().fill(theme.accent).frame(width: 2.5).padding(.vertical, 9).offset(x: -3)
-                }
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 7))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .highPriorityGesture(
+                TapGesture(count: 1).onEnded { _ in action() }
+            )
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "\(prompt.title)，\(prompt.groupName)，\(variableLabel)\(prompt.isFavorite ? "，已收藏" : "")"
+            )
+            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : [.isButton])
+            .accessibilityAction(named: Text("选择提示词"), action)
+
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(theme.muted)
+                .frame(width: 34, height: 30)
+                .contentShape(Rectangle())
+                .onDrag(dragProvider)
+                .accessibilityLabel("拖动排序")
+                .accessibilityHint("拖住后移动到另一条提示词的上方或下方")
         }
-        .buttonStyle(.plain)
+        .padding(.leading, 9)
+        .padding(.vertical, 8)
+        .background(selected ? theme.selection : hovering ? theme.chip : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay(alignment: .leading) {
+            if selected {
+                Capsule().fill(theme.accent).frame(width: 2.5).padding(.vertical, 9).offset(x: -3)
+            }
+        }
+        .overlay(alignment: .top) {
+            if dropTarget {
+                Capsule()
+                    .fill(theme.accent)
+                    .frame(height: 2)
+                    .padding(.horizontal, 7)
+                    .offset(y: -1)
+            }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 7))
         .onHover { hovering = $0 }
-        .accessibilityLabel(
-            "\(prompt.title)，\(prompt.groupName)，\(variableLabel)\(prompt.isFavorite ? "，已收藏" : "")"
-        )
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
     private var variableLabel: String {
         prompt.variables.isEmpty ? "无变量" : "\(prompt.variables.count) 个变量"
+    }
+}
+
+private struct PromptRowDropDelegate: DropDelegate {
+    let targetPromptID: Int64
+    @Binding var draggedPromptID: Int64?
+    @Binding var dropTargetPromptID: Int64?
+    let move: (Int64, Int64, Bool) -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard draggedPromptID != targetPromptID else { return }
+        dropTargetPromptID = targetPromptID
+    }
+
+    func dropExited(info: DropInfo) {
+        if dropTargetPromptID == targetPromptID { dropTargetPromptID = nil }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let draggedPromptID, draggedPromptID != targetPromptID else {
+            self.draggedPromptID = nil
+            dropTargetPromptID = nil
+            return false
+        }
+        move(draggedPromptID, targetPromptID, info.location.y > 28)
+        self.draggedPromptID = nil
+        dropTargetPromptID = nil
+        return true
     }
 }
 
@@ -205,21 +279,20 @@ private struct PromptPreviewView: View {
                 actions(theme).padding(.horizontal, 12).padding(.vertical, 11)
             } else if let prompt = model.selectedPrompt {
                 VStack(spacing: 0) {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text(prompt.title)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(theme.foreground)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Text(prompt.body)
-                                .font(.system(size: 11.5, design: .monospaced))
-                                .foregroundStyle(theme.foregroundSecondary)
-                                .lineSpacing(7)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .padding(16)
-                    }
+                    Text(prompt.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(theme.foreground)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
+                        .padding(.bottom, 12)
+                    ProgressiveTextView(
+                        text: prompt.body,
+                        foreground: theme.foregroundSecondary
+                    )
+                    .id(prompt.id)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
                     Divider().overlay(theme.hairline)
                     VStack(spacing: 7) {
                         infoLine("分组", prompt.groupName, theme: theme)
