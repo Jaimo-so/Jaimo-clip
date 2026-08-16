@@ -223,9 +223,9 @@ public final class SQLiteClipStore {
     public func loadPrompts() throws -> [PromptItem] {
         let statement = try prepare("""
         SELECT id, title, body, groupName, isFavorite, variables, createdAt,
-               updatedAt, lastUsedAt, useCount
+               updatedAt, lastUsedAt, useCount, sortOrder
         FROM prompts
-        ORDER BY isFavorite DESC, COALESCE(lastUsedAt, updatedAt) DESC, id DESC;
+        ORDER BY sortOrder ASC, id ASC;
         """)
         defer { sqlite3_finalize(statement) }
 
@@ -245,11 +245,12 @@ public final class SQLiteClipStore {
         isFavorite: Bool = false,
         date: Date = Date()
     ) throws -> PromptItem {
+        let sortOrder = try nextPromptSortOrder()
         let statement = try prepare("""
         INSERT INTO prompts (
             title, body, groupName, isFavorite, variables, createdAt, updatedAt,
-            lastUsedAt, useCount
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0);
+            lastUsedAt, useCount, sortOrder
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, ?);
         """)
         defer { sqlite3_finalize(statement) }
 
@@ -260,6 +261,7 @@ public final class SQLiteClipStore {
         try bind(try encodeVariables(variables), to: statement, at: 5)
         sqlite3_bind_double(statement, 6, date.timeIntervalSince1970)
         sqlite3_bind_double(statement, 7, date.timeIntervalSince1970)
+        sqlite3_bind_int64(statement, 8, Int64(sortOrder))
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw ClipStoreError.execute(databaseMessage)
         }
@@ -272,7 +274,8 @@ public final class SQLiteClipStore {
             isFavorite: isFavorite,
             variables: variables,
             createdAt: date,
-            updatedAt: date
+            updatedAt: date,
+            sortOrder: sortOrder
         )
     }
 
@@ -334,6 +337,29 @@ public final class SQLiteClipStore {
         }
     }
 
+    public func setPromptOrder(_ ids: [Int64]) throws {
+        guard !ids.isEmpty else { return }
+        try execute("BEGIN IMMEDIATE TRANSACTION;")
+        do {
+            let statement = try prepare("UPDATE prompts SET sortOrder = ? WHERE id = ?;")
+            defer { sqlite3_finalize(statement) }
+
+            for (index, id) in ids.enumerated() {
+                sqlite3_bind_int64(statement, 1, Int64(index + 1))
+                sqlite3_bind_int64(statement, 2, id)
+                guard sqlite3_step(statement) == SQLITE_DONE else {
+                    throw ClipStoreError.execute(databaseMessage)
+                }
+                sqlite3_reset(statement)
+                sqlite3_clear_bindings(statement)
+            }
+            try execute("COMMIT;")
+        } catch {
+            try? execute("ROLLBACK;")
+            throw error
+        }
+    }
+
     public func promptCount() throws -> Int {
         let statement = try prepare("SELECT COUNT(*) FROM prompts;")
         defer { sqlite3_finalize(statement) }
@@ -373,12 +399,18 @@ public final class SQLiteClipStore {
             createdAt REAL NOT NULL,
             updatedAt REAL NOT NULL,
             lastUsedAt REAL,
-            useCount INTEGER NOT NULL DEFAULT 0
+            useCount INTEGER NOT NULL DEFAULT 0,
+            sortOrder INTEGER NOT NULL DEFAULT 0
         );
         """)
+        if try !hasColumn(named: "sortOrder", in: "prompts") {
+            try execute("ALTER TABLE prompts ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0;")
+        }
+        try execute("UPDATE prompts SET sortOrder = id WHERE sortOrder = 0;")
         try execute("CREATE INDEX IF NOT EXISTS prompts_updatedAt ON prompts(updatedAt DESC);")
         try execute("CREATE INDEX IF NOT EXISTS prompts_groupName ON prompts(groupName);")
         try execute("CREATE INDEX IF NOT EXISTS prompts_favorite ON prompts(isFavorite);")
+        try execute("CREATE INDEX IF NOT EXISTS prompts_sortOrder ON prompts(sortOrder ASC);")
     }
 
     private func enforceLimit(_ limit: Int) throws {
@@ -498,8 +530,25 @@ public final class SQLiteClipStore {
             createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 6)),
             updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 7)),
             lastUsedAt: lastUsedAt,
-            useCount: Int(sqlite3_column_int64(statement, 9))
+            useCount: Int(sqlite3_column_int64(statement, 9)),
+            sortOrder: Int(sqlite3_column_int64(statement, 10))
         )
+    }
+
+    private func nextPromptSortOrder() throws -> Int {
+        let statement = try prepare("SELECT COALESCE(MAX(sortOrder), 0) + 1 FROM prompts;")
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { return 1 }
+        return Int(sqlite3_column_int64(statement, 0))
+    }
+
+    private func hasColumn(named column: String, in table: String) throws -> Bool {
+        let statement = try prepare("PRAGMA table_info(\(table));")
+        defer { sqlite3_finalize(statement) }
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if string(statement, column: 1) == column { return true }
+        }
+        return false
     }
 
     private func encodeVariables(_ variables: [PromptVariable]) throws -> String {

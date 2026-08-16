@@ -8,6 +8,12 @@ final class ClipFlowPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+final class ClipFlowHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+}
+
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {
     let panel: ClipFlowPanel
@@ -40,7 +46,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         // LSUIElement apps are intentionally not activated by a nonactivating panel.
         // hidesOnDeactivate would therefore hide the panel immediately after orderFront.
         panel.hidesOnDeactivate = false
-        panel.isMovableByWindowBackground = true
+        panel.becomesKeyOnlyIfNeeded = false
+        // Treating the full borderless panel as draggable makes AppKit steal drags from
+        // overlay scroll bars. Window movement is handled by WindowDragRegion instead.
+        panel.isMovableByWindowBackground = false
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
@@ -49,7 +58,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.animationBehavior = .utilityWindow
         panel.isReleasedWhenClosed = false
 
-        let hostingView = NSHostingView(rootView: ContentView(model: model))
+        let hostingView = ClipFlowHostingView(rootView: ContentView(model: model))
         hostingView.translatesAutoresizingMaskIntoConstraints = false
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor

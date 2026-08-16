@@ -63,6 +63,7 @@ struct ContentView: View {
                     .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                     .zIndex(40)
             }
+
         }
         .foregroundStyle(theme.foreground)
         .clipShape(RoundedRectangle(cornerRadius: WindowMetrics.cornerRadius, style: .continuous))
@@ -70,6 +71,11 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: WindowMetrics.cornerRadius, style: .continuous)
                 .stroke((colorScheme == .dark ? Color.white : Color.black).opacity(0.18), lineWidth: 0.5)
         )
+        .overlay(alignment: .top) {
+            WindowDragRegion()
+                .frame(height: 8)
+                .accessibilityHidden(true)
+        }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.settingsOpen)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.promptEditorOpen)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.promptRunnerOpen)
@@ -616,45 +622,6 @@ private struct PreviewView: View {
             .lineSpacing(8)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(24)
-    }
-}
-
-private struct ProgressiveTextView: View {
-    let chunks: [TextChunker.Chunk]
-    let foreground: Color
-    @State private var renderedChunkCount = 1
-
-    init(text: String, foreground: Color) {
-        chunks = TextChunker.chunks(from: text)
-        self.foreground = foreground
-    }
-
-    var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8.5) {
-                ForEach(chunks.indices.prefix(renderedChunkCount), id: \.self) { index in
-                    Text(chunks[index].text)
-                        .font(.system(size: 11.5, design: .monospaced))
-                        .foregroundStyle(foreground)
-                        .lineSpacing(8.5)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .textSelection(.enabled)
-                }
-
-                if renderedChunkCount < chunks.count {
-                    Color.clear
-                        .frame(height: 1)
-                        .id(renderedChunkCount)
-                        .onAppear(perform: renderNextChunk)
-                        .accessibilityHidden(true)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-    }
-
-    private func renderNextChunk() {
-        renderedChunkCount = min(renderedChunkCount + 1, chunks.count)
     }
 }
 

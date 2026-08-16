@@ -46,7 +46,12 @@ final class AppModel: ObservableObject {
             filteredCache = nil
         }
     }
-    @Published private(set) var prompts: [PromptItem] = []
+    @Published private(set) var prompts: [PromptItem] = [] {
+        didSet {
+            promptsRevision &+= 1
+            filteredPromptsCache = nil
+        }
+    }
     @Published var phase: ClipFlowPhase = .loading
     @Published var libraryMode: LibraryMode = .history
     @Published var query = "" {
@@ -82,6 +87,13 @@ final class AppModel: ObservableObject {
     private var toastDismissal: DispatchWorkItem?
     private var itemsRevision = 0
     private var filteredCache: (revision: Int, filter: ClipFilter, query: String, items: [ClipItem])?
+    private var promptsRevision = 0
+    private var filteredPromptsCache: (
+        revision: Int,
+        scope: PromptScope,
+        query: String,
+        prompts: [PromptItem]
+    )?
 
     init(preferences: PreferencesStore) {
         self.preferences = preferences
@@ -117,7 +129,14 @@ final class AppModel: ObservableObject {
 
     var filteredPrompts: [PromptItem] {
         let needle = promptQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return prompts.filter { prompt in
+        if let filteredPromptsCache,
+           filteredPromptsCache.revision == promptsRevision,
+           filteredPromptsCache.scope == promptScope,
+           filteredPromptsCache.query == needle {
+            return filteredPromptsCache.prompts
+        }
+
+        let result = prompts.filter { prompt in
             let matchesScope: Bool
             switch promptScope {
             case .all: matchesScope = true
@@ -130,6 +149,8 @@ final class AppModel: ObservableObject {
                 || prompt.body.lowercased().contains(needle)
                 || prompt.groupName.lowercased().contains(needle)
         }
+        filteredPromptsCache = (promptsRevision, promptScope, needle, result)
+        return result
     }
 
     var promptGroups: [String] {
@@ -237,6 +258,7 @@ final class AppModel: ObservableObject {
 
     func setPromptScope(_ scope: PromptScope) {
         promptScope = scope
+        filteredPromptsCache = nil
         selectedPromptID = filteredPrompts.first?.id
     }
 
@@ -260,6 +282,26 @@ final class AppModel: ObservableObject {
         groups.insert(moved, at: destination)
         preferences.setPromptGroupOrder(groups)
         objectWillChange.send()
+    }
+
+    func movePrompt(_ promptID: Int64, relativeTo targetID: Int64, after: Bool) {
+        guard promptID != targetID,
+              let store,
+              let sourceIndex = prompts.firstIndex(where: { $0.id == promptID }) else { return }
+
+        var reordered = prompts
+        let moved = reordered.remove(at: sourceIndex)
+        guard let targetIndex = reordered.firstIndex(where: { $0.id == targetID }) else { return }
+        reordered.insert(moved, at: targetIndex + (after ? 1 : 0))
+
+        do {
+            try store.setPromptOrder(reordered.map(\.id))
+            prompts = reordered
+            selectedPromptID = promptID
+        } catch {
+            prompts = (try? store.loadPrompts()) ?? prompts
+            showToast("提示词排序保存失败")
+        }
     }
 
     func cycleFilter(_ offset: Int) {
@@ -532,6 +574,7 @@ final class AppModel: ObservableObject {
     }
 
     private func resetPromptSelection() {
+        filteredPromptsCache = nil
         selectedPromptID = filteredPrompts.first?.id
     }
 

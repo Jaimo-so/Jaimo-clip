@@ -128,6 +128,17 @@ do {
         try require(try store.promptCount() == 0, "提示词删除失败")
     }
 
+    try withStore { store in
+        let first = try store.createPrompt(title: "第一", body: "a", groupName: "产品", variables: [])
+        let second = try store.createPrompt(title: "第二", body: "b", groupName: "产品", variables: [])
+        let third = try store.createPrompt(title: "第三", body: "c", groupName: "产品", variables: [])
+        try store.setPromptOrder([third.id, first.id, second.id])
+        try require(
+            try store.loadPrompts().map(\.id) == [third.id, first.id, second.id],
+            "提示词拖拽排序没有持久化"
+        )
+    }
+
     try require(
         AppVersion("v0.1.2")! > AppVersion("0.1.1")!,
         "更新版本比较失败"
