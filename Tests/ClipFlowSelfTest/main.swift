@@ -83,6 +83,18 @@ do {
         try require(items.first(where: { $0.id == first.id })?.isFavorite == true, "收藏项没有保留")
     }
 
+    try require(SQLiteClipStore.defaultHistoryLimit == 150, "默认历史上限必须为 150 条")
+    try withStore { store in
+        for index in 0..<155 {
+            _ = try store.insert(
+                makeClip("history-\(index)", date: Date(timeIntervalSince1970: Double(index))),
+                limit: 1_000
+            )
+        }
+        try store.enforceHistoryLimit()
+        try require(store.itemCount() == 150, "现有历史没有收敛到默认上限")
+    }
+
     let promptBody = "请用{{语气}}向{{受众}}解释：{{内容}}。再次强调：{{语气}}。"
     try require(
         PromptTemplate.variableNames(in: promptBody) == ["语气", "受众", "内容"],
@@ -175,7 +187,7 @@ do {
         "相同版本不应提示更新"
     )
 
-    print("Jaimo clip self-test passed: 23 checks")
+    print("Jaimo clip self-test passed: 29 checks")
 } catch {
     fputs("Jaimo clip self-test failed: \(error)\n", stderr)
     exit(1)

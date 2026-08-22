@@ -4,6 +4,8 @@ import Foundation
 
 @MainActor
 final class AppModel: ObservableObject {
+    static let historyLimit = SQLiteClipStore.defaultHistoryLimit
+
     enum FocusArea {
         case search
         case tabs
@@ -219,6 +221,7 @@ final class AppModel: ObservableObject {
             guard let self, self.loadGeneration == generation else { return }
             do {
                 if self.store == nil { self.store = try SQLiteClipStore() }
+                try self.store?.enforceHistoryLimit(Self.historyLimit)
                 self.items = try self.store?.loadAll() ?? []
                 self.prompts = try self.store?.loadPrompts() ?? []
                 self.phase = .ready

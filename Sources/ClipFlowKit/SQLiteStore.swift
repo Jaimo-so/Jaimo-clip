@@ -28,6 +28,8 @@ public enum ClipStoreError: LocalizedError {
 }
 
 public final class SQLiteClipStore {
+    public static let defaultHistoryLimit = 150
+
     private let databaseURL: URL
     private let imagesURL: URL
     private var database: OpaquePointer?
@@ -113,7 +115,10 @@ public final class SQLiteClipStore {
     }
 
     @discardableResult
-    public func insert(_ captured: CapturedClip, limit: Int = 500) throws -> ClipItem? {
+    public func insert(
+        _ captured: CapturedClip,
+        limit: Int = SQLiteClipStore.defaultHistoryLimit
+    ) throws -> ClipItem? {
         if try latestContentHash() == captured.contentHash {
             return nil
         }
@@ -169,7 +174,7 @@ public final class SQLiteClipStore {
                 meta: captured.meta,
                 contentHash: captured.contentHash
             )
-            try enforceLimit(limit)
+            try enforceHistoryLimit(limit)
             return item
         } catch {
             if let storedImageURL {
@@ -413,7 +418,9 @@ public final class SQLiteClipStore {
         try execute("CREATE INDEX IF NOT EXISTS prompts_sortOrder ON prompts(sortOrder ASC);")
     }
 
-    private func enforceLimit(_ limit: Int) throws {
+    public func enforceHistoryLimit(
+        _ limit: Int = SQLiteClipStore.defaultHistoryLimit
+    ) throws {
         let overflow = max(0, try itemCount() - max(1, limit))
         guard overflow > 0 else { return }
 

@@ -4,23 +4,58 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var model: AppModel
+    let fixedMode: AppModel.LibraryMode?
+    let embedded: Bool
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchFocused: Bool
     @State private var hoveredTab: ClipFilter?
 
+    init(
+        model: AppModel,
+        fixedMode: AppModel.LibraryMode? = nil,
+        embedded: Bool = false
+    ) {
+        self.model = model
+        self.fixedMode = fixedMode
+        self.embedded = embedded
+    }
+
     var body: some View {
         let theme = ClipFlowTheme(scheme: colorScheme)
+        framedContent(layeredContent(theme), theme: theme)
+            .foregroundStyle(theme.foreground)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.settingsOpen)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.promptEditorOpen)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.promptRunnerOpen)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.promptDeleteConfirmationOpen)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.toastMessage)
+            .onAppear {
+                if let fixedMode { model.setMode(fixedMode) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .clipFlowFocusSearch)) { _ in
+                searchFocused = true
+                model.focusArea = .search
+            }
+            .onChange(of: searchFocused) { focused in
+                if focused { model.focusArea = .search }
+                else if model.focusArea == .search { model.focusArea = .other }
+            }
+    }
+
+    private func layeredContent(_ theme: ClipFlowTheme) -> some View {
         let modalOpen = model.settingsOpen
             || model.promptEditorOpen
             || model.promptRunnerOpen
             || model.promptDeleteConfirmationOpen
-        ZStack {
-            if colorScheme == .dark {
-                VisualEffectBackground().ignoresSafeArea()
-                theme.glass.ignoresSafeArea()
-            } else {
-                theme.lightWindowBackground.ignoresSafeArea()
+        return ZStack {
+            if !embedded {
+                if colorScheme == .dark {
+                    VisualEffectBackground().ignoresSafeArea()
+                    theme.glass.ignoresSafeArea()
+                } else {
+                    theme.lightWindowBackground.ignoresSafeArea()
+                }
             }
 
             VStack(spacing: 0) {
@@ -34,7 +69,7 @@ struct ContentView: View {
             }
             .disabled(modalOpen)
 
-            if model.settingsOpen {
+            if model.settingsOpen && !embedded {
                 SettingsView(model: model)
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.965)))
                     .zIndex(20)
@@ -58,61 +93,57 @@ struct ContentView: View {
                     .zIndex(26)
             }
 
-            if let message = model.toastMessage {
+            if let message = model.toastMessage, !embedded {
                 toast(message, theme: theme)
                     .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                     .zIndex(40)
             }
+        }
+    }
 
-        }
-        .foregroundStyle(theme.foreground)
-        .clipShape(RoundedRectangle(cornerRadius: WindowMetrics.cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: WindowMetrics.cornerRadius, style: .continuous)
-                .stroke((colorScheme == .dark ? Color.white : Color.black).opacity(0.18), lineWidth: 0.5)
-        )
-        .overlay(alignment: .top) {
-            WindowDragRegion()
-                .frame(height: 8)
-                .accessibilityHidden(true)
-        }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.settingsOpen)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.promptEditorOpen)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.promptRunnerOpen)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.promptDeleteConfirmationOpen)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.toastMessage)
-        .onReceive(NotificationCenter.default.publisher(for: .clipFlowFocusSearch)) { _ in
-            searchFocused = true
-            model.focusArea = .search
-        }
-        .onChange(of: searchFocused) { focused in
-            if focused { model.focusArea = .search }
-            else if model.focusArea == .search { model.focusArea = .other }
+    @ViewBuilder
+    private func framedContent<Content: View>(_ content: Content, theme: ClipFlowTheme) -> some View {
+        if embedded {
+            content
+        } else {
+            content
+                .clipShape(RoundedRectangle(cornerRadius: WindowMetrics.cornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: WindowMetrics.cornerRadius, style: .continuous)
+                        .stroke((colorScheme == .dark ? Color.white : Color.black).opacity(0.18), lineWidth: 0.5)
+                )
+                .overlay(alignment: .top) {
+                    WindowDragRegion()
+                        .frame(height: 8)
+                        .accessibilityHidden(true)
+                }
         }
     }
 
     private func searchBar(_ theme: ClipFlowTheme) -> some View {
         HStack(spacing: 11) {
-            HStack(spacing: 2) {
-                ForEach(AppModel.LibraryMode.allCases) { mode in
-                    Button {
-                        model.setMode(mode)
-                    } label: {
-                        Text(mode.title)
-                            .font(.system(size: 11.5, weight: model.libraryMode == mode ? .semibold : .regular))
-                            .foregroundStyle(model.libraryMode == mode ? theme.foreground : theme.muted)
-                            .padding(.horizontal, 9)
-                            .frame(height: 26)
-                            .background(model.libraryMode == mode ? theme.chipHigh : Color.clear)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
+            if fixedMode == nil {
+                HStack(spacing: 2) {
+                    ForEach(AppModel.LibraryMode.allCases) { mode in
+                        Button {
+                            model.setMode(mode)
+                        } label: {
+                            Text(mode.title)
+                                .font(.system(size: 11.5, weight: model.libraryMode == mode ? .semibold : .regular))
+                                .foregroundStyle(model.libraryMode == mode ? theme.foreground : theme.muted)
+                                .padding(.horizontal, 9)
+                                .frame(height: 26)
+                                .background(model.libraryMode == mode ? theme.chipHigh : Color.clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(model.libraryMode == mode ? [.isSelected] : [])
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(model.libraryMode == mode ? [.isSelected] : [])
                 }
+                .padding(2)
+                .background(theme.chip)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
-            .padding(2)
-            .background(theme.chip)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
 
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 17, weight: .regular))

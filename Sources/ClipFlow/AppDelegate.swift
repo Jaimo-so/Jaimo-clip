@@ -15,7 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferences = PreferencesStore()
         model = AppModel(preferences: preferences)
         monitor = ClipboardMonitor()
-        panelController = PanelController(model: model)
+        panelController = PanelController(model: model, preferences: preferences)
         statusController = StatusItemController(panelController: panelController)
 
         model.clipboardMonitor = monitor
@@ -43,9 +43,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             model?.updateManager.checkIfNeeded()
         }
 
-        // Finder 双击启动时必须给出可见反馈。Jaimo clip 是 LSUIElement 菜单栏应用，
-        // 不主动展示面板会让用户误以为应用没有打开。
-        panelController.show()
+        // 首次启动直接显示完整工具站完成可发现性引导。
+        // 后续登录启动保持隐藏，由 ⌥Space 或菜单栏直接唤起完整工具站。
+        if preferences.consumeIslandOnboardingPresentation() {
+            panelController.show()
+        }
     }
 
     func applicationShouldHandleReopen(

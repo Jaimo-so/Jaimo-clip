@@ -1,10 +1,43 @@
-# Jaimo clip for macOS
+<p align="center">
+  <img src="Resources/AppLogo.png" width="144" alt="Jaimo clip Logo">
+</p>
 
-![Jaimo clip Logo](Resources/AppLogo.png)
+<h1 align="center">Jaimo clip</h1>
 
-Jaimo clip 是一个轻量、原生、本地优先的 macOS 剪贴板历史工具。当前实现以 `clipflow-app.html` 为唯一视觉真源，以 `clipflow-handoff-spec.md` 为实现契约；不包含 Electron、WebView、账户、云同步或 AI 运行时。
+<p align="center">
+  原生、本地优先的 macOS 个人工具站
+</p>
 
-> 当前公开版本：`0.4.1`。仅支持 Apple Silicon（M1/M2/M3/M4 及后续芯片），不提供 Intel（x86_64）版本。
+<p align="center">
+  <a href="https://github.com/Jaimo-so/Jaimo-clip/releases/latest"><img src="https://img.shields.io/github/v/release/Jaimo-so/Jaimo-clip?display_name=tag&sort=semver" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/macOS-13%2B-111111?logo=apple" alt="macOS 13 or later">
+  <img src="https://img.shields.io/badge/Apple%20Silicon-M1%2B-111111" alt="Apple Silicon">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Jaimo-so/Jaimo-clip/releases/latest"><strong>下载最新版本</strong></a>
+</p>
+
+<p align="center">
+  <img src="docs/images/jaimo-hero.png" width="100%" alt="Jaimo 个人工具站产品展示图">
+</p>
+
+Jaimo clip 把常用的本机操作收进一个由 `⌥Space` 直接唤起的工具站：首页提供时间、快速便签、本地录音、摄像头检查和最近应用；应用页集中搜索、收藏并启动本机应用；提示词与剪切板页面负责管理长期复用的模板和临时内容。
+
+所有剪切板记录、图片、提示词、便签和录音均保存在本机。应用无需账户，不依赖云同步，不包含 Electron、WebView 或 AI 运行时；界面和核心能力均使用 Swift、SwiftUI、AppKit 与 macOS 系统框架实现。
+
+> 当前公开版本：`0.5.0`。支持 macOS 13 或更高版本，仅提供 Apple Silicon（M1/M2/M3/M4 及后续芯片）安装包，不提供 Intel（x86_64）版本。
+
+## 产品展示
+
+| 可组合首页 | 本机应用启动台 |
+| --- | --- |
+| ![Jaimo 首页：时间、便签、录音、摄像头与最近应用](docs/images/jaimo-home.png) | ![Jaimo 应用页：搜索、收藏并启动本机应用](docs/images/jaimo-apps.png) |
+
+首页组件可以排序和隐藏。录音只在用户主动开始后请求麦克风权限，文件保存在本机；摄像头画面只做实时预览，不录制、不保存、不上传。应用启动台扫描本机应用目录，收藏和最近启动记录同样只保存在本机。
+
+产品设计语言记录在 `DESIGN.md`。`jaimo-island-handoff-spec.md` 保留了工具站早期交互方案和设计演进；旧版剪贴板视图的视觉与实现资料继续保留在 `clipflow-app.html` 和 `clipflow-handoff-spec.md`，用于追踪兼容行为。
 
 ## 下载与安装
 
@@ -18,11 +51,16 @@ Jaimo clip 是一个轻量、原生、本地优先的 macOS 剪贴板历史工�
 如需验证下载是否完整，将同一 Release 中的 `.dmg` 与 `.dmg.sha256` 放在同一目录后执行：
 
 ```bash
-shasum -a 256 -c Jaimo-clip-0.4.1-macOS-Apple-Silicon.dmg.sha256
+shasum -a 256 -c Jaimo-clip-0.5.0-macOS-Apple-Silicon.dmg.sha256
 ```
 
 ## 当前能力
 
+- 使用 `⌥Space` 从隐藏态直接打开完整工具站，不经过额外的中间界面；再次触发快捷键、点击窗口外部、点击关闭按钮或按 `Escape` 可隐藏
+- 首页包含时间、快速便签、本地录音、摄像头检查和最近使用应用，组件支持排序、隐藏和恢复
+- 录音支持开始、暂停、继续、完成、实时音量反馈和在访达中定位；M4A 文件只保存在本机 Application Support 目录
+- 摄像头只进行本机实时预览，用于会议前检查画面，不录制、不保存、不上传
+- 应用页扫描 `/Applications`、`/System/Applications` 和 `~/Applications`，支持搜索、收藏、启动和最近使用记录
 - 每 0.4 秒读取 `NSPasteboard.changeCount`，自动记录文字、代码、HTTP(S) 链接和图片
 - 支持直接复制的 PNG/JPEG 像素数据，也支持从 Finder、飞书等应用复制 JPG/JPEG、PNG 等本地图片文件；文件引用会读取真实图片内容，不会误存为文件图标
 - 设置页和菜单栏支持检查更新；发现 GitHub Release 新版本后，可一键下载、校验、安装并自动重新启动
@@ -32,7 +70,7 @@ shasum -a 256 -c Jaimo-clip-0.4.1-macOS-Apple-Silicon.dmg.sha256
 - 可将文字、代码或链接历史保存为提示词；使用 `{{变量名}}` 定义调用时填写的模板变量
 - 长文本预览按片段渐进渲染，首屏只排版开头内容，滚动到底部后继续加载后续片段
 - 连续相同内容按 SHA-256 去重；自身写回剪贴板产生的 change count 会被忽略
-- 历史上限为 500 条，超出后淘汰最旧的非收藏项，收藏项保留
+- 历史上限为 150 条，超出后淘汰最旧的非收藏项，收藏项保留
 - SQLite 只保存元数据和图片路径；图片文件独立保存在本机 Application Support 目录
 - 默认排除 1Password、钥匙串访问和终端，可在 `⌘,` 偏好设置中移除
 - 清空历史需要在 8 秒内进行第二次确认
@@ -40,15 +78,15 @@ shasum -a 256 -c Jaimo-clip-0.4.1-macOS-Apple-Silicon.dmg.sha256
 
 ## 使用说明
 
-双击启动应用会立即显示主面板；应用已在后台运行时，再次双击也会重新显示。菜单栏图标左键显示或隐藏面板，右键可以显示面板、检查更新或退出应用。
+首次启动会直接显示完整工具站；后续登录启动保持隐藏。应用已在后台运行时，再次双击会重新显示工具站。菜单栏图标左键显示或隐藏完整工具站，右键可以显示工具站、检查更新或退出应用。
 
 快捷键：
 
-- `⌥Space`：显示或隐藏面板
+- `⌥Space`：直接显示或隐藏完整工具站
 - `↑` / `↓`：移动选中项
 - `↵`：复制选中项到系统剪贴板
 - `⌘F`：聚焦搜索
-- `⌘1` / `⌘2`：切换剪贴板历史 / 提示词库
+- `⌘1` / `⌘2` / `⌘3` / `⌘4`：切换首页 / 应用 / 提示词 / 剪切板
 - `⌘N`：新建提示词
 - `⌘E`：编辑选中的提示词
 - `⌘S`：切换收藏
@@ -66,8 +104,9 @@ Jaimo clip 不上传剪贴板内容，不要求账户，也没有云同步。链
 
 ```text
 ~/Library/Application Support/ClipFlow/
-├── ClipFlow.sqlite3      # 剪贴板历史与独立的提示词表
-└── Images/
+├── ClipFlow.sqlite3      # 剪贴板历史、提示词、应用启动记录等本机数据
+├── Images/               # 剪切板图片
+└── Recordings/           # 用户主动创建的 M4A 录音
 ```
 
 删除应用不会自动删除上述本地数据。偏好设置中的“清空历史”只删除剪贴板历史，不会删除提示词库；如需彻底移除全部数据，需要退出应用后删除该目录。
@@ -117,7 +156,7 @@ open "build/Jaimo clip.app"
 ./Scripts/package-dmg.sh
 ```
 
-安装包名称自动包含 `Resources/Info.plist` 中的当前版本号，例如 `dist/Jaimo-clip-0.4.1-macOS-Apple-Silicon.dmg`。配套的 `.sha256` 文件用于校验下载文件是否完整。
+安装包名称自动包含 `Resources/Info.plist` 中的当前版本号，例如 `dist/Jaimo-clip-0.5.0-macOS-Apple-Silicon.dmg`。配套的 `.sha256` 文件用于校验下载文件是否完整。
 
 如果更换了 `Resources/AppLogo.png`，重新生成 macOS 图标：
 
@@ -151,9 +190,12 @@ Sources/ClipFlowUpdater/   独立更新助手，负责安全替换与失败回�
 Sources/CSQLite/           SQLite 系统库桥接
 Tests/ClipFlowSelfTest/    可直接运行的核心自检
 Resources/                 Info.plist、原始 Logo 和 AppIcon.icns
+docs/images/               README 产品展示图与真实界面截图
 Scripts/                   图标生成、应用构建和 DMG 打包脚本
-clipflow-app.html          可直接打开交互的视觉真源
-clipflow-handoff-spec.md   实现契约
+DESIGN.md                  当前工具站设计语言
+jaimo-island-handoff-spec.md  工具站早期交互方案与设计演进记录
+clipflow-app.html          旧版剪贴板交互原型
+clipflow-handoff-spec.md   旧版剪贴板实现契约与兼容说明
 ```
 
 Swift Package 内部 target 仍沿用 `ClipFlow` 命名，这是为保持已有构建结构和升级兼容；用户可见品牌均为 `Jaimo clip`。

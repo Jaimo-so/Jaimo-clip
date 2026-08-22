@@ -13,6 +13,7 @@ final class PreferencesStore: ObservableObject {
         static let closeAfterCopy = "closeAfterCopy"
         static let excludedApps = "excludedApps"
         static let promptGroupOrder = "promptGroupOrder"
+        static let hasPresentedIslandOnboarding = "hasPresentedIslandOnboarding"
     }
 
     static let defaultExcludedApps = [
@@ -79,6 +80,12 @@ final class PreferencesStore: ObservableObject {
         let lowered = bundleID.lowercased()
         return excludedApps.contains(where: { $0.name == "1Password" })
             && (lowered.contains("1password") || lowered.contains("agilebits"))
+    }
+
+    func consumeIslandOnboardingPresentation() -> Bool {
+        guard !defaults.bool(forKey: Key.hasPresentedIslandOnboarding) else { return false }
+        defaults.set(true, forKey: Key.hasPresentedIslandOnboarding)
+        return true
     }
 
     private func persistExcludedApps() {

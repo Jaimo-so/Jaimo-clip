@@ -1,0 +1,1137 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Jaimo Island — macOS 个人工具站原型</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --desktop: #111820;
+      --desktop-panel: #1b2530;
+      --fg: oklch(97% 0.004 260);
+      --fg-2: oklch(84% 0.008 260);
+      --muted: oklch(72% 0.012 260);
+      --accent: oklch(74% 0.13 218);
+      --danger: oklch(70% 0.17 25);
+      --favorite: oklch(83% 0.15 85);
+      --glass: oklch(24% 0.022 265 / 0.91);
+      --glass-2: oklch(20% 0.02 265 / 0.74);
+      --glass-3: oklch(29% 0.02 265 / 0.7);
+      --control: oklch(100% 0 0 / 0.08);
+      --control-hi: oklch(100% 0 0 / 0.14);
+      --line: oklch(100% 0 0 / 0.10);
+      --line-weak: oklch(100% 0 0 / 0.055);
+      --selection: oklch(100% 0 0 / 0.13);
+      --shadow: rgba(0, 0, 0, 0.58);
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
+      --mono: "SF Mono", Menlo, ui-monospace, monospace;
+    }
+
+    [data-theme="light"] {
+      color-scheme: light;
+      --desktop: #dce9ef;
+      --desktop-panel: #edf5f7;
+      --fg: oklch(22% 0.01 265);
+      --fg-2: oklch(34% 0.01 265);
+      --muted: oklch(48% 0.012 265);
+      --accent: oklch(56% 0.14 218);
+      --glass: oklch(96% 0.004 265 / 0.96);
+      --glass-2: oklch(91% 0.006 265 / 0.9);
+      --glass-3: oklch(100% 0 0 / 0.72);
+      --control: oklch(0% 0 0 / 0.07);
+      --control-hi: oklch(0% 0 0 / 0.12);
+      --line: oklch(0% 0 0 / 0.11);
+      --line-weak: oklch(0% 0 0 / 0.06);
+      --selection: oklch(0% 0 0 / 0.09);
+      --shadow: rgba(54, 73, 84, 0.25);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      overflow: hidden;
+      background: var(--desktop);
+      color: var(--fg);
+      font-family: var(--font);
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, textarea { font: inherit; }
+    button { color: inherit; }
+    button, [role="button"] { -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
+    .icon { width: 17px; height: 17px; display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .icon.sm { width: 14px; height: 14px; }
+
+    .desktop-chrome {
+      height: 30px;
+      padding: 0 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: color-mix(in oklch, var(--fg) 86%, transparent);
+      font-size: 12px;
+      background: color-mix(in oklch, var(--desktop-panel) 75%, transparent);
+      border-bottom: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
+      user-select: none;
+    }
+    .desktop-brand, .desktop-status { display: flex; align-items: center; gap: 14px; }
+    .desktop-brand strong { font-weight: 650; }
+    .desktop-status { gap: 10px; font-variant-numeric: tabular-nums; }
+    .wallpaper-shape {
+      position: fixed;
+      z-index: -1;
+      border: 1px solid color-mix(in oklch, var(--fg) 7%, transparent);
+      background: var(--desktop-panel);
+      opacity: 0.62;
+    }
+    .shape-a { width: 35vw; height: 46vh; left: 7vw; top: 19vh; border-radius: 120px; transform: rotate(-13deg); }
+    .shape-b { width: 42vw; height: 36vh; right: 4vw; bottom: 4vh; border-radius: 160px; transform: rotate(9deg); opacity: 0.4; }
+    .desktop-hint {
+      position: fixed;
+      left: 20px;
+      bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      user-select: none;
+    }
+    .keycap {
+      padding: 2px 6px;
+      border-radius: 5px;
+      background: color-mix(in oklch, var(--desktop-panel) 78%, transparent);
+      border: 1px solid color-mix(in oklch, var(--fg) 10%, transparent);
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--fg-2);
+    }
+
+    .island-shell {
+      position: fixed;
+      z-index: 20;
+      top: max(38px, env(safe-area-inset-top));
+      left: 50%;
+      transform: translateX(-50%);
+      border: 1px solid var(--line);
+      background: var(--glass);
+      box-shadow: 0 22px 70px -20px var(--shadow), inset 0 1px 0 color-mix(in oklch, var(--fg) 14%, transparent);
+      backdrop-filter: blur(34px) saturate(155%);
+      -webkit-backdrop-filter: blur(34px) saturate(155%);
+      overflow: hidden;
+    }
+    .island-shell.compact { width: 342px; height: 54px; border-radius: 28px; }
+    .island-shell.hidden { display: none; }
+    .island-shell.expanded {
+      width: min(948px, calc(100vw - 32px));
+      height: min(680px, calc(100dvh - 78px));
+      border-radius: 28px;
+    }
+    .compact-view, .expanded-view { width: 100%; height: 100%; }
+    .island-shell.compact .expanded-view, .island-shell.expanded .compact-view { display: none; }
+    .compact-view {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 7px 6px 10px;
+      animation: reveal 160ms ease-out both;
+    }
+    .expanded-view {
+      display: grid;
+      grid-template-rows: 62px minmax(0, 1fr);
+      animation: reveal 180ms ease-out both;
+    }
+    @keyframes reveal { from { opacity: 0; transform: translateY(-7px) scale(.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    @media (prefers-reduced-motion: reduce) { .compact-view, .expanded-view, .toast, .modal-card { animation: none !important; } }
+
+    .brand-orb {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      background: var(--accent);
+      color: #07171b;
+      font-size: 15px;
+      font-weight: 780;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.34);
+    }
+    .compact-copy { min-width: 0; flex: 1; }
+    .compact-time { font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; }
+    .compact-status { margin-top: 1px; color: var(--muted); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .compact-actions { display: flex; align-items: center; gap: 4px; }
+    .icon-button {
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      color: var(--fg-2);
+    }
+    .icon-button:hover { background: var(--control); color: var(--fg); }
+    .icon-button.primary { background: color-mix(in oklch, var(--accent) 22%, transparent); color: var(--fg); }
+
+    .topbar {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 0 14px 0 16px;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in oklch, var(--glass-2) 46%, transparent);
+    }
+    .top-brand { display: flex; align-items: center; gap: 9px; flex: 0 0 auto; }
+    .top-brand .brand-orb { width: 30px; height: 30px; font-size: 13px; }
+    .top-brand-copy strong { display: block; font-size: 13px; line-height: 1.15; }
+    .top-brand-copy span { display: block; margin-top: 2px; font-size: 9.5px; color: var(--muted); }
+    .primary-nav { align-self: stretch; display: flex; align-items: stretch; gap: 2px; min-width: 0; }
+    .nav-button {
+      position: relative;
+      min-width: 74px;
+      padding: 0 12px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .nav-button:hover { color: var(--fg); background: var(--control); }
+    .nav-button.active { color: var(--fg); }
+    .nav-button.active::after {
+      content: "";
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 0;
+      height: 2px;
+      border-radius: 2px 2px 0 0;
+      background: var(--accent);
+    }
+    .top-actions { margin-left: auto; display: flex; gap: 3px; flex: 0 0 auto; }
+
+    .workspace { position: relative; min-height: 0; overflow: hidden; }
+    .page { display: none; width: 100%; height: 100%; min-height: 0; }
+    .page.active { display: flex; flex-direction: column; animation: pageIn 150ms ease-out both; }
+    @keyframes pageIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    .page-toolbar {
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 13px 18px;
+      border-bottom: 1px solid var(--line-weak);
+    }
+    .page-title { min-width: 0; }
+    .eyebrow { color: var(--muted); font-size: 10.5px; line-height: 1.2; }
+    .page-title h1 { margin: 3px 0 0; font-size: 18px; line-height: 1.2; font-weight: 670; text-wrap: balance; }
+    .toolbar-actions { margin-left: auto; display: flex; align-items: center; gap: 7px; }
+    .button {
+      min-height: 30px;
+      padding: 5px 11px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--control);
+      color: var(--fg-2);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      cursor: pointer;
+      font-size: 11.5px;
+    }
+    .button:hover { background: var(--control-hi); color: var(--fg); }
+    .button:disabled { opacity: .42; cursor: not-allowed; pointer-events: none; }
+    .button.primary { color: var(--fg); border-color: color-mix(in oklch, var(--accent) 42%, transparent); background: color-mix(in oklch, var(--accent) 20%, transparent); }
+    .button.primary:hover { background: color-mix(in oklch, var(--accent) 30%, transparent); }
+    .button.danger:hover { color: var(--danger); border-color: color-mix(in oklch, var(--danger) 34%, transparent); background: color-mix(in oklch, var(--danger) 13%, transparent); }
+
+    .search-field {
+      height: 34px;
+      width: min(260px, 30vw);
+      padding: 0 11px 0 34px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--fg);
+      background-color: var(--control);
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239aa7b2' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: 10px center;
+      outline: 0;
+      font-size: 12px;
+    }
+    .search-field::placeholder { color: var(--muted); }
+
+    .home-scroll { overflow-y: auto; padding: 18px; }
+    .home-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; }
+    .widget {
+      position: relative;
+      min-height: 176px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--glass-3);
+      overflow: hidden;
+    }
+    .widget[data-widget="clock"] { grid-column: span 5; }
+    .widget[data-widget="note"] { grid-column: span 7; }
+    .widget[data-widget="camera"] { grid-column: span 7; }
+    .widget[data-widget="recent"] { grid-column: span 5; }
+    .widget-head { display: flex; align-items: flex-start; gap: 8px; min-height: 30px; }
+    .widget-title { min-width: 0; }
+    .widget-title strong { display: block; font-size: 12.5px; font-weight: 640; }
+    .widget-title span { display: block; margin-top: 3px; color: var(--muted); font-size: 10.5px; }
+    .widget-action { margin-left: auto; }
+    .widget-edit-tools { display: none; margin-left: auto; gap: 3px; }
+    .editing-widgets .widget-edit-tools { display: flex; }
+    .editing-widgets .widget { border-style: dashed; }
+    .clock-value { margin-top: 26px; font-size: 44px; line-height: .94; font-weight: 620; letter-spacing: -0.035em; font-variant-numeric: tabular-nums; }
+    .clock-date { margin-top: 10px; color: var(--fg-2); font-size: 12px; }
+    .clock-zone { margin-top: 4px; color: var(--muted); font-size: 10.5px; }
+    .note-area {
+      width: 100%;
+      height: 112px;
+      margin-top: 10px;
+      padding: 10px 0;
+      resize: none;
+      border: 0;
+      border-top: 1px solid var(--line-weak);
+      outline: 0;
+      background: transparent;
+      color: var(--fg-2);
+      font-size: 12px;
+      line-height: 1.75;
+      text-wrap: pretty;
+    }
+    .note-area::placeholder { color: var(--muted); }
+    .camera-layout { display: grid; grid-template-columns: 1fr 150px; gap: 16px; align-items: stretch; margin-top: 12px; }
+    .camera-copy { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; }
+    .camera-copy strong { font-size: 14px; }
+    .camera-copy p { margin: 8px 0 14px; color: var(--muted); font-size: 11px; line-height: 1.65; text-wrap: pretty; }
+    .camera-preview {
+      min-height: 112px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: var(--glass-2);
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 10.5px;
+    }
+    .camera-preview video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+    .recent-stack { margin-top: 10px; display: grid; gap: 6px; }
+    .recent-row { min-width: 0; padding: 7px 8px; border-radius: 10px; display: flex; align-items: center; gap: 9px; cursor: pointer; }
+    .recent-row:hover { background: var(--control); }
+    .recent-row-copy { min-width: 0; flex: 1; }
+    .recent-row-copy strong { display: block; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .recent-row-copy span { display: block; margin-top: 2px; color: var(--muted); font-size: 9.5px; }
+    .mini-app { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: #fff; font-size: 15px; box-shadow: inset 0 1px 0 rgba(255,255,255,.25); }
+    .restore-bar { display: none; align-items: center; gap: 8px; margin-bottom: 12px; padding: 9px 11px; border: 1px dashed var(--line); border-radius: 11px; color: var(--muted); font-size: 11px; }
+    .restore-bar.show { display: flex; }
+    .restore-list { display: flex; gap: 5px; flex-wrap: wrap; }
+
+    .apps-layout { min-height: 0; flex: 1; display: grid; grid-template-columns: 220px minmax(0, 1fr); }
+    .favorites-pane { padding: 16px 12px; border-right: 1px solid var(--line); background: var(--glass-2); overflow-y: auto; }
+    .section-label { padding: 0 7px 8px; color: var(--muted); font-size: 10px; font-weight: 650; text-transform: uppercase; }
+    .favorite-app {
+      width: 100%;
+      padding: 7px;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .favorite-app:hover { background: var(--control); }
+    .favorite-app span { min-width: 0; flex: 1; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .apps-main { min-width: 0; overflow-y: auto; padding: 17px; }
+    .apps-meta { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 13px; }
+    .apps-meta strong { font-size: 12.5px; }
+    .apps-meta span { color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+    .app-grid { display: grid; grid-template-columns: repeat(5, minmax(92px, 1fr)); gap: 9px; }
+    .app-tile {
+      position: relative;
+      min-width: 0;
+      border: 1px solid transparent;
+      border-radius: 13px;
+      background: transparent;
+      color: var(--fg-2);
+      text-align: center;
+    }
+    .app-tile:hover { border-color: var(--line); background: var(--control); color: var(--fg); }
+    .app-launch {
+      width: 100%;
+      padding: 13px 8px 10px;
+      border: 0;
+      border-radius: 13px;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+    }
+    .app-tile .mini-app { width: 48px; height: 48px; margin: 0 auto 8px; border-radius: 12px; font-size: 22px; }
+    .app-name { display: block; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pin-button {
+      position: absolute;
+      top: 5px;
+      right: 5px;
+      width: 25px;
+      height: 25px;
+      border: 0;
+      border-radius: 8px;
+      display: none;
+      place-items: center;
+      background: var(--glass);
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .app-tile:hover .pin-button, .pin-button.pinned { display: grid; }
+    .pin-button.pinned { color: var(--favorite); }
+
+    .library-toolbar { min-height: 60px; padding: 11px 14px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); }
+    .library-toolbar .search-field { flex: 1; width: auto; max-width: 340px; }
+    .filters { min-width: 0; display: flex; align-items: center; gap: 3px; overflow-x: auto; scrollbar-width: none; }
+    .filters::-webkit-scrollbar { display: none; }
+    .filter-button {
+      min-height: 28px;
+      padding: 4px 9px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      white-space: nowrap;
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .filter-button:hover { color: var(--fg); background: var(--control); }
+    .filter-button.active { color: var(--fg); background: var(--control-hi); }
+    .library-panes { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 330px; }
+    .library-list { min-width: 0; overflow-y: auto; padding: 7px; border-right: 1px solid var(--line); }
+    .library-row {
+      position: relative;
+      min-width: 0;
+      width: 100%;
+      padding: 10px 11px;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      color: inherit;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .library-row:hover { background: var(--control); }
+    .library-row.selected { background: var(--selection); }
+    .library-row.selected::before { content: ""; position: absolute; left: 0; top: 11px; bottom: 11px; width: 2px; border-radius: 2px; background: var(--accent); }
+    .row-glyph { width: 40px; height: 34px; border: 1px solid var(--line); border-radius: 9px; background: var(--control); display: grid; place-items: center; flex: 0 0 auto; color: var(--fg-2); }
+    .row-copy { min-width: 0; flex: 1; }
+    .row-copy strong { display: block; font-size: 12px; font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row-copy span { display: block; margin-top: 4px; color: var(--muted); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row-star { color: var(--favorite); font-size: 12px; }
+    .library-detail { min-width: 0; display: flex; flex-direction: column; background: var(--glass-2); }
+    .detail-scroll { min-height: 0; flex: 1; overflow-y: auto; padding: 17px; }
+    .detail-kicker { color: var(--muted); font-size: 10px; }
+    .detail-title { margin: 5px 0 13px; font-size: 15px; font-weight: 650; text-wrap: balance; }
+    .detail-body { margin: 0; color: var(--fg-2); font-size: 11.5px; line-height: 1.75; white-space: pre-wrap; word-break: break-word; text-wrap: pretty; }
+    .detail-info { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); display: grid; gap: 7px; }
+    .info-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 10.5px; }
+    .info-row span:first-child { color: var(--muted); }
+    .info-row span:last-child { color: var(--fg-2); text-align: right; }
+    .detail-actions { display: flex; gap: 6px; padding: 12px 14px; border-top: 1px solid var(--line); }
+    .detail-actions .button { flex: 1; }
+    .mobile-library-action { display: none; gap: 7px; padding: 10px 12px; border-top: 1px solid var(--line); background: var(--glass-2); }
+    .mobile-library-action .button { flex: 1; }
+    .empty-state { height: 100%; min-height: 220px; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--muted); }
+    .empty-state strong { display: block; color: var(--fg-2); font-size: 13px; }
+    .empty-state span { display: block; margin-top: 7px; font-size: 11px; line-height: 1.6; }
+
+    .modal {
+      position: fixed;
+      z-index: 40;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgba(4, 8, 12, 0.46);
+    }
+    .modal.open { display: flex; }
+    .modal-card {
+      width: min(460px, 100%);
+      max-height: min(600px, calc(100dvh - 48px));
+      overflow-y: auto;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: var(--glass);
+      box-shadow: 0 28px 80px -24px var(--shadow);
+      backdrop-filter: blur(30px) saturate(145%);
+      -webkit-backdrop-filter: blur(30px) saturate(145%);
+      animation: reveal 160ms ease-out both;
+    }
+    .modal-head { min-height: 55px; padding: 0 13px 0 17px; display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+    .modal-head strong { font-size: 14px; }
+    .modal-head .icon-button { margin-left: auto; }
+    .settings-body, .prompt-form { padding: 15px; }
+    .settings-group { border: 1px solid var(--line); border-radius: 13px; overflow: hidden; margin-bottom: 12px; }
+    .settings-label { padding: 0 2px 7px; color: var(--muted); font-size: 10px; font-weight: 650; }
+    .setting-row { min-height: 48px; padding: 9px 12px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line-weak); }
+    .setting-row:last-child { border-bottom: 0; }
+    .setting-copy { min-width: 0; flex: 1; }
+    .setting-copy strong { display: block; font-size: 11.5px; font-weight: 560; }
+    .setting-copy span { display: block; margin-top: 3px; color: var(--muted); font-size: 9.5px; }
+    .segmented { display: flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--control); }
+    .segment { min-height: 26px; padding: 3px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 10.5px; cursor: pointer; }
+    .segment.active { background: var(--control-hi); color: var(--fg); }
+    .switch { width: 36px; height: 21px; padding: 2px; border: 0; border-radius: 11px; background: var(--control-hi); cursor: pointer; }
+    .switch::after { content: ""; display: block; width: 17px; height: 17px; border-radius: 50%; background: var(--muted); transition: transform 160ms ease-out; }
+    .switch.on { background: var(--accent); }
+    .switch.on::after { background: #fff; transform: translateX(15px); }
+    .field { display: grid; gap: 6px; margin-bottom: 12px; }
+    .field label { color: var(--muted); font-size: 10.5px; }
+    .field input, .field textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--control);
+      color: var(--fg);
+      padding: 9px 10px;
+      outline: 0;
+      font-size: 12px;
+    }
+    .field textarea { min-height: 150px; resize: vertical; line-height: 1.65; }
+    .form-actions { display: flex; justify-content: flex-end; gap: 7px; }
+
+    .toast {
+      position: fixed;
+      z-index: 60;
+      left: 50%;
+      bottom: 24px;
+      transform: translateX(-50%);
+      max-width: calc(100vw - 32px);
+      padding: 9px 13px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--glass);
+      box-shadow: 0 12px 34px -12px var(--shadow);
+      color: var(--fg-2);
+      font-size: 11.5px;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .toast.show { animation: toastIn 180ms ease-out both; }
+    @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 7px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+    @media (max-width: 820px) {
+      .topbar { gap: 8px; }
+      .top-brand-copy { display: none; }
+      .nav-button { min-width: 58px; padding: 0 8px; }
+      .app-grid { grid-template-columns: repeat(4, minmax(82px, 1fr)); }
+      .library-panes { grid-template-columns: minmax(0, 1fr) 290px; }
+    }
+    @media (max-width: 650px) {
+      .island-shell.expanded { top: 34px; width: calc(100vw - 16px); height: calc(100dvh - 42px); border-radius: 22px; }
+      .topbar { padding-inline: 10px; }
+      .nav-button { min-width: 42px; }
+      .nav-button span { display: none; }
+      .page-toolbar { min-height: 64px; padding: 10px 13px; }
+      .page-title .eyebrow { display: none; }
+      .page-title h1 { font-size: 15px; }
+      .home-scroll { padding: 12px; }
+      .home-grid { grid-template-columns: 1fr; }
+      .widget[data-widget] { grid-column: auto; }
+      .apps-layout { grid-template-columns: 150px minmax(0, 1fr); }
+      .app-grid { grid-template-columns: repeat(2, minmax(82px, 1fr)); }
+      .library-panes { grid-template-columns: 1fr; }
+      .library-detail { display: none; }
+      .library-list { border-right: 0; }
+      .mobile-library-action { display: flex; }
+      .filters { display: none; }
+      .search-field { width: 44vw; }
+      .camera-layout { grid-template-columns: 1fr; }
+      .camera-preview { min-height: 150px; }
+      .desktop-brand span { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <svg class="sr-only" aria-hidden="true">
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 1.3 4.1L17 9l-3.7 1.9L12 15l-1.3-4.1L7 9l3.7-1.9L12 3Z"/><path d="m19 15 .7 2.3L22 18l-2.3.7L19 21l-.7-2.3L16 18l2.3-.7L19 15Z"/></symbol>
+    <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2h6v2"/><path d="M9 9h6M9 13h6M9 17h4"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M14.5 5 13 3h-2L9.5 5H5a2 2 0 0 0-2 2v11h18V7a2 2 0 0 0-2-2h-4.5Z"/><circle cx="12" cy="12" r="4"/></symbol>
+    <symbol id="i-note" viewBox="0 0 24 24"><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="m4 16-1 5 5-1L19 9l-4-4L4 16Z"/><path d="m13 7 4 4"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-hide" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 10.7a2 2 0 0 0 2.7 2.7"/><path d="M9.9 4.2A10.7 10.7 0 0 1 12 4c5.5 0 9 6 9 6a16 16 0 0 1-2.1 2.7M6.2 6.2C4.2 7.5 3 10 3 10s3.5 6 9 6a9.6 9.6 0 0 0 3-.5"/></symbol>
+  </svg>
+
+  <div class="desktop-chrome" aria-hidden="true">
+    <div class="desktop-brand"><strong>●</strong><strong>Finder</strong><span>文件</span><span>编辑</span><span>显示</span></div>
+    <div class="desktop-status"><span>◉</span><span>⌨</span><span id="menuClock">8月22日 周六 10:28</span></div>
+  </div>
+  <div class="wallpaper-shape shape-a"></div>
+  <div class="wallpaper-shape shape-b"></div>
+
+  <section class="island-shell compact" id="island" aria-label="Jaimo Island">
+    <div class="compact-view">
+      <div class="brand-orb" aria-hidden="true">J</div>
+      <div class="compact-copy">
+        <div class="compact-time" id="compactClock">10:28</div>
+        <div class="compact-status">剪切板已记录 18 条 · 本地运行中</div>
+      </div>
+      <div class="compact-actions">
+        <button class="icon-button" id="quickNote" aria-label="打开快速便签" title="快速便签"><svg class="icon"><use href="#i-note"/></svg></button>
+        <button class="icon-button" id="quickCamera" aria-label="检查摄像头" title="摄像头检查"><svg class="icon"><use href="#i-camera"/></svg></button>
+        <button class="icon-button primary" id="expandIsland" aria-label="展开工具站" title="展开"><svg class="icon"><use href="#i-chevron-down"/></svg></button>
+      </div>
+    </div>
+
+    <div class="expanded-view">
+      <header class="topbar">
+        <div class="top-brand">
+          <div class="brand-orb" aria-hidden="true">J</div>
+          <div class="top-brand-copy"><strong>Jaimo</strong><span>个人工具站</span></div>
+        </div>
+        <nav class="primary-nav" aria-label="一级导航">
+          <button class="nav-button active" data-page="home"><svg class="icon"><use href="#i-home"/></svg><span>首页</span></button>
+          <button class="nav-button" data-page="apps"><svg class="icon"><use href="#i-grid"/></svg><span>应用</span></button>
+          <button class="nav-button" data-page="prompts"><svg class="icon"><use href="#i-spark"/></svg><span>提示词</span></button>
+          <button class="nav-button" data-page="clipboard"><svg class="icon"><use href="#i-clipboard"/></svg><span>剪切板</span></button>
+        </nav>
+        <div class="top-actions">
+          <button class="icon-button" id="openSettings" aria-label="打开设置" title="设置"><svg class="icon"><use href="#i-settings"/></svg></button>
+          <button class="icon-button" id="collapseIsland" aria-label="收起工具站" title="收起"><svg class="icon"><use href="#i-chevron-up"/></svg></button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="page active" data-page-panel="home">
+          <div class="page-toolbar">
+            <div class="page-title"><div class="eyebrow">今天也是高效的一天</div><h1 id="greeting">上午好，Jaimo</h1></div>
+            <div class="toolbar-actions">
+              <button class="button" id="customizeWidgets"><svg class="icon sm"><use href="#i-edit"/></svg><span>管理组件</span></button>
+            </div>
+          </div>
+          <div class="home-scroll" id="homeScroll">
+            <div class="restore-bar" id="restoreBar"><span>已隐藏：</span><div class="restore-list" id="restoreList"></div></div>
+            <div class="home-grid" id="homeGrid">
+              <article class="widget" data-widget="clock" data-label="时间">
+                <div class="widget-head">
+                  <div class="widget-title"><strong>时间</strong><span>上海 · 中国标准时间</span></div>
+                  <div class="widget-edit-tools">
+                    <button class="icon-button move-up" aria-label="向前移动时间组件"><svg class="icon sm"><use href="#i-arrow-up"/></svg></button>
+                    <button class="icon-button move-down" aria-label="向后移动时间组件"><svg class="icon sm"><use href="#i-arrow-down"/></svg></button>
+                    <button class="icon-button hide-widget" aria-label="隐藏时间组件"><svg class="icon sm"><use href="#i-hide"/></svg></button>
+                  </div>
+                </div>
+                <div class="clock-value" id="homeClock">10:28</div>
+                <div class="clock-date" id="homeDate">2026 年 8 月 22 日 · 星期六</div>
+                <div class="clock-zone">Asia/Shanghai</div>
+              </article>
+
+              <article class="widget" data-widget="note" data-label="快速便签">
+                <div class="widget-head">
+                  <div class="widget-title"><strong>快速便签</strong><span id="noteStatus">内容自动保存在本机</span></div>
+                  <div class="widget-edit-tools">
+                    <button class="icon-button move-up" aria-label="向前移动快速便签"><svg class="icon sm"><use href="#i-arrow-up"/></svg></button>
+                    <button class="icon-button move-down" aria-label="向后移动快速便签"><svg class="icon sm"><use href="#i-arrow-down"/></svg></button>
+                    <button class="icon-button hide-widget" aria-label="隐藏快速便签"><svg class="icon sm"><use href="#i-hide"/></svg></button>
+                  </div>
+                </div>
+                <label class="sr-only" for="quickNoteArea">快速便签</label>
+                <textarea class="note-area" id="quickNoteArea" placeholder="记下稍后要处理的事…">今天要完成：
+· 整理新版工具站的首页组件
+· 复盘本周使用频率最高的提示词</textarea>
+              </article>
+
+              <article class="widget" data-widget="camera" data-label="摄像头检查">
+                <div class="widget-head">
+                  <div class="widget-title"><strong>摄像头检查</strong><span id="cameraStatus">尚未请求摄像头权限</span></div>
+                  <div class="widget-edit-tools">
+                    <button class="icon-button move-up" aria-label="向前移动摄像头组件"><svg class="icon sm"><use href="#i-arrow-up"/></svg></button>
+                    <button class="icon-button move-down" aria-label="向后移动摄像头组件"><svg class="icon sm"><use href="#i-arrow-down"/></svg></button>
+                    <button class="icon-button hide-widget" aria-label="隐藏摄像头组件"><svg class="icon sm"><use href="#i-hide"/></svg></button>
+                  </div>
+                </div>
+                <div class="camera-layout">
+                  <div class="camera-copy">
+                    <strong>会议前快速确认画面</strong>
+                    <p>摄像头画面只在本机实时预览，不录制、不保存、不上传。</p>
+                    <button class="button primary" id="toggleCamera"><svg class="icon sm"><use href="#i-camera"/></svg><span>启动摄像头</span></button>
+                  </div>
+                  <div class="camera-preview" id="cameraPreview"><span>预览未开启</span></div>
+                </div>
+              </article>
+
+              <article class="widget" data-widget="recent" data-label="最近使用">
+                <div class="widget-head">
+                  <div class="widget-title"><strong>最近使用</strong><span>来自本机应用启动记录</span></div>
+                  <div class="widget-edit-tools">
+                    <button class="icon-button move-up" aria-label="向前移动最近使用组件"><svg class="icon sm"><use href="#i-arrow-up"/></svg></button>
+                    <button class="icon-button move-down" aria-label="向后移动最近使用组件"><svg class="icon sm"><use href="#i-arrow-down"/></svg></button>
+                    <button class="icon-button hide-widget" aria-label="隐藏最近使用组件"><svg class="icon sm"><use href="#i-hide"/></svg></button>
+                  </div>
+                </div>
+                <div class="recent-stack">
+                  <div class="recent-row" data-launch="Figma"><div class="mini-app" style="background:#f04f32">◆</div><div class="recent-row-copy"><strong>Figma</strong><span>8 分钟前</span></div><svg class="icon sm"><use href="#i-chevron-down"/></svg></div>
+                  <div class="recent-row" data-launch="Notion"><div class="mini-app" style="background:#181818">N</div><div class="recent-row-copy"><strong>Notion</strong><span>26 分钟前</span></div><svg class="icon sm"><use href="#i-chevron-down"/></svg></div>
+                  <div class="recent-row" data-launch="Safari"><div class="mini-app" style="background:#1689da">◎</div><div class="recent-row-copy"><strong>Safari</strong><span>1 小时前</span></div><svg class="icon sm"><use href="#i-chevron-down"/></svg></div>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" data-page-panel="apps">
+          <div class="page-toolbar">
+            <div class="page-title"><div class="eyebrow">本机应用</div><h1>应用程序</h1></div>
+            <div class="toolbar-actions"><label class="sr-only" for="appSearch">搜索应用</label><input class="search-field" id="appSearch" type="search" placeholder="搜索应用…"></div>
+          </div>
+          <div class="apps-layout">
+            <aside class="favorites-pane"><div class="section-label">常用</div><div id="favoritesList"></div></aside>
+            <div class="apps-main"><div class="apps-meta"><strong>全部应用</strong><span id="appCount">0 个应用</span></div><div class="app-grid" id="appGrid"></div></div>
+          </div>
+        </section>
+
+        <section class="page" data-page-panel="prompts">
+          <div class="library-toolbar">
+            <label class="sr-only" for="promptSearch">搜索提示词</label><input class="search-field" id="promptSearch" type="search" placeholder="搜索提示词…">
+            <div class="filters" id="promptFilters" aria-label="提示词分组"></div>
+            <button class="button primary" id="newPrompt"><svg class="icon sm"><use href="#i-plus"/></svg><span>新建</span></button>
+          </div>
+          <div class="library-panes"><div class="library-list" id="promptList"></div><aside class="library-detail" id="promptDetail"></aside></div>
+          <div class="mobile-library-action"><button class="button primary" id="mobileUsePrompt"><svg class="icon sm"><use href="#i-copy"/></svg><span>填写并复制</span></button><button class="button" id="mobileFavoritePrompt"><svg class="icon sm"><use href="#i-star"/></svg><span>收藏</span></button></div>
+        </section>
+
+        <section class="page" data-page-panel="clipboard">
+          <div class="library-toolbar">
+            <label class="sr-only" for="clipSearch">搜索剪切板</label><input class="search-field" id="clipSearch" type="search" placeholder="搜索剪切板历史…">
+            <div class="filters" id="clipFilters" aria-label="剪切板分类"></div>
+          </div>
+          <div class="library-panes"><div class="library-list" id="clipList"></div><aside class="library-detail" id="clipDetail"></aside></div>
+          <div class="mobile-library-action"><button class="button primary" id="mobileCopyClip"><svg class="icon sm"><use href="#i-copy"/></svg><span>复制到剪切板</span></button><button class="button" id="mobileFavoriteClip"><svg class="icon sm"><use href="#i-star"/></svg><span>收藏</span></button></div>
+        </section>
+      </main>
+    </div>
+  </section>
+
+  <div class="desktop-hint"><span class="keycap">⌥ Space</span><span>唤起 / 收起 Jaimo</span></div>
+
+  <div class="modal" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modal-card">
+      <div class="modal-head"><strong id="settingsTitle">设置</strong><button class="icon-button close-modal" aria-label="关闭设置"><svg class="icon"><use href="#i-close"/></svg></button></div>
+      <div class="settings-body">
+        <div class="settings-label">通用</div>
+        <div class="settings-group">
+          <div class="setting-row"><div class="setting-copy"><strong>开机自动启动</strong><span>登录 Mac 后在后台启动 Jaimo</span></div><button class="switch on" role="switch" aria-checked="true" aria-label="开机自动启动"></button></div>
+          <div class="setting-row"><div class="setting-copy"><strong>唤起快捷键</strong><span>在任意应用中唤起灵动岛</span></div><span class="keycap">⌥ Space</span></div>
+          <div class="setting-row"><div class="setting-copy"><strong>复制后收起</strong><span>从剪切板或提示词复制后自动收起</span></div><button class="switch on" id="autoCollapseSwitch" role="switch" aria-checked="true" aria-label="复制后收起"></button></div>
+        </div>
+        <div class="settings-label">外观</div>
+        <div class="settings-group">
+          <div class="setting-row"><div class="setting-copy"><strong>主题</strong><span>原生玻璃材质会随系统外观调整</span></div><div class="segmented" id="themeSegments"><button class="segment active" data-theme-choice="dark">深色</button><button class="segment" data-theme-choice="light">浅色</button></div></div>
+        </div>
+        <div class="settings-label">隐私与数据</div>
+        <div class="settings-group">
+          <div class="setting-row"><div class="setting-copy"><strong>仅保存在本机</strong><span>已启用 · 无账户、无云同步</span></div><span style="color:var(--accent);font-size:11px">已保护</span></div>
+          <div class="setting-row"><div class="setting-copy"><strong>剪切板历史上限</strong><span>收藏项不参与自动淘汰</span></div><span style="font-size:11px;color:var(--fg-2)">150 条</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="promptModal" role="dialog" aria-modal="true" aria-labelledby="promptFormTitle">
+    <div class="modal-card">
+      <div class="modal-head"><strong id="promptFormTitle">新建提示词</strong><button class="icon-button close-modal" aria-label="关闭新建提示词"><svg class="icon"><use href="#i-close"/></svg></button></div>
+      <form class="prompt-form" id="promptForm">
+        <div class="field"><label for="promptTitle">标题</label><input id="promptTitle" required placeholder="例如：文章润色"></div>
+        <div class="field"><label for="promptGroup">分组</label><input id="promptGroup" value="写作" required></div>
+        <div class="field"><label for="promptBody">正文</label><textarea id="promptBody" required placeholder="使用 {{变量名}} 定义模板变量"></textarea></div>
+        <div class="form-actions"><button class="button close-modal" type="button">取消</button><button class="button primary" type="submit">保存提示词</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal" id="runnerModal" role="dialog" aria-modal="true" aria-labelledby="runnerTitle">
+    <div class="modal-card">
+      <div class="modal-head"><strong id="runnerTitle">填写提示词变量</strong><button class="icon-button close-modal" aria-label="关闭变量填写"><svg class="icon"><use href="#i-close"/></svg></button></div>
+      <form class="prompt-form" id="runnerForm">
+        <p id="runnerDescription" style="margin:0 0 14px;color:var(--muted);font-size:11px;line-height:1.65"></p>
+        <div id="runnerFields"></div>
+        <div class="form-actions"><button class="button close-modal" type="button">取消</button><button class="button primary" type="submit"><svg class="icon sm"><use href="#i-copy"/></svg><span>复制最终文本</span></button></div>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const $ = (selector, root = document) => root.querySelector(selector);
+    const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+    const island = $("#island");
+    const toast = $("#toast");
+    let toastTimer;
+    let currentPage = "home";
+    let cameraStream = null;
+
+    const apps = [
+      { name: "Safari", symbol: "◎", color: "#1689da", favorite: true },
+      { name: "Figma", symbol: "◆", color: "#f04f32", favorite: true },
+      { name: "Notion", symbol: "N", color: "#181818", favorite: true },
+      { name: "Visual Studio Code", symbol: "</>", color: "#147ec1", favorite: true },
+      { name: "Calendar", symbol: "22", color: "#e9544f", favorite: false },
+      { name: "Mail", symbol: "✉", color: "#2689d8", favorite: false },
+      { name: "Messages", symbol: "••", color: "#42b74b", favorite: false },
+      { name: "Music", symbol: "♫", color: "#dc3d61", favorite: false },
+      { name: "Photos", symbol: "✿", color: "#d58436", favorite: false },
+      { name: "Preview", symbol: "⌕", color: "#3e8f92", favorite: false },
+      { name: "Terminal", symbol: ">_", color: "#252a2f", favorite: false },
+      { name: "System Settings", symbol: "⚙", color: "#66717b", favorite: false },
+      { name: "Xcode", symbol: "X", color: "#2585c8", favorite: false },
+      { name: "Freeform", symbol: "▦", color: "#e0663e", favorite: false },
+      { name: "Keynote", symbol: "K", color: "#3782db", favorite: false }
+    ];
+
+    const prompts = [
+      { id: 1, title: "文章润色", group: "写作", favorite: true, count: 18, body: "请在不删除任何核心信息的前提下，以 {{语气}} 的语气润色以下内容。\n\n要求：\n1. 保留原文定义和意义\n2. 优化逻辑层次\n3. 使用 {{受众}} 能理解的表达" },
+      { id: 2, title: "PRD 评审", group: "产品", favorite: false, count: 12, body: "你是资深产品负责人。请从用户价值、业务目标、异常边界、验收标准四个角度评审 {{需求文档}}。" },
+      { id: 3, title: "会议纪要整理", group: "工作", favorite: false, count: 9, body: "请将以下会议记录整理为：会议结论、决策事项、待办任务、责任人、截止时间。不要删除未达成一致的意见。" },
+      { id: 4, title: "Swift 代码评审", group: "开发", favorite: true, count: 7, body: "请评审以下 Swift 代码，重点检查线程安全、资源释放、SwiftUI 状态边界和 macOS 13+ 兼容性。" },
+      { id: 5, title: "用户访谈纲要", group: "产品", favorite: false, count: 5, body: "根据 {{研究目标}} 生成一份半结构化用户访谈纲要，避免诱导性问题，并为每个核心问题提供追问。" }
+    ];
+
+    const clips = [
+      { id: 1, kind: "text", label: "文字", title: "灵动岛的核心不是形状，而是从状态到任务的连续性。", source: "Notion", time: "2 分钟前", favorite: true, body: "灵动岛的核心不是形状，而是从状态到任务的连续性。\n\n紧凑状态只提供当前上下文和高频操作，复杂内容应当在用户主动展开后出现。" },
+      { id: 2, kind: "link", label: "链接", title: "https://developer.apple.com/design/human-interface-guidelines/", source: "Safari", time: "8 分钟前", favorite: false, body: "https://developer.apple.com/design/human-interface-guidelines/" },
+      { id: 3, kind: "code", label: "代码", title: "enum IslandState { case hidden, compact, expanded }", source: "Xcode", time: "14 分钟前", favorite: false, body: "enum IslandState {\n    case hidden\n    case compact\n    case expanded(destination: ToolDestination)\n}" },
+      { id: 4, kind: "image", label: "图片", title: "Jaimo 首页组件布局草图.png", source: "Figma", time: "23 分钟前", favorite: true, body: "1920 × 1200 PNG 图片\n本地路径：~/Library/Application Support/ClipFlow/Images/" },
+      { id: 5, kind: "text", label: "文字", title: "应用页：左侧收藏，右侧全部应用，支持本地搜索。", source: "Jaimo", time: "31 分钟前", favorite: false, body: "应用页：\n· 左侧收藏 / 常用\n· 右侧全部应用\n· 支持本地搜索\n· 双击或回车启动" }
+    ];
+
+    let promptSelection = 1;
+    let promptFilter = "全部";
+    let clipSelection = 1;
+    let clipFilter = "全部";
+
+    function showToast(message) {
+      clearTimeout(toastTimer);
+      toast.textContent = message;
+      toast.classList.remove("show");
+      void toast.offsetWidth;
+      toast.classList.add("show");
+      toastTimer = setTimeout(() => toast.classList.remove("show"), 1900);
+    }
+
+    function setIslandState(state) {
+      island.classList.toggle("expanded", state === "expanded");
+      island.classList.toggle("compact", state === "compact");
+      island.classList.toggle("hidden", state === "hidden");
+      if (state !== "expanded") {
+        stopCamera();
+        $$(".modal.open").forEach(modal => modal.classList.remove("open"));
+      }
+    }
+
+    function switchPage(page) {
+      currentPage = page;
+      $$(".nav-button").forEach(button => button.classList.toggle("active", button.dataset.page === page));
+      $$("[data-page-panel]").forEach(panel => panel.classList.toggle("active", panel.dataset.pagePanel === page));
+    }
+
+    function updateClock() {
+      const now = new Date();
+      const time = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
+      const full = new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "long" }).format(now);
+      const menu = new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
+      $("#compactClock").textContent = time;
+      $("#homeClock").textContent = time;
+      $("#homeDate").textContent = full;
+      $("#menuClock").textContent = menu;
+      const hour = now.getHours();
+      $("#greeting").textContent = `${hour < 6 ? "夜深了" : hour < 12 ? "上午好" : hour < 18 ? "下午好" : "晚上好"}，Jaimo`;
+    }
+
+    function appIcon(app) { return `<div class="mini-app" style="background:${app.color}">${escapeHTML(app.symbol)}</div>`; }
+    function renderApps() {
+      const query = $("#appSearch").value.trim().toLowerCase();
+      const visible = apps.filter(app => app.name.toLowerCase().includes(query));
+      $("#appCount").textContent = `${visible.length} 个应用`;
+      $("#appGrid").innerHTML = visible.map(app => `
+        <div class="app-tile">
+          <button class="pin-button ${app.favorite ? "pinned" : ""}" data-pin="${app.name}" aria-label="${app.favorite ? "取消收藏" : "收藏"} ${app.name}">★</button>
+          <button class="app-launch" data-app="${app.name}" aria-label="启动 ${app.name}">${appIcon(app)}<span class="app-name">${app.name}</span></button>
+        </div>`).join("") || `<div class="empty-state" style="grid-column:1/-1"><div><strong>没有匹配的应用</strong><span>试试更短的关键词。</span></div></div>`;
+      $("#favoritesList").innerHTML = apps.filter(app => app.favorite).map(app => `<button class="favorite-app" data-app="${app.name}">${appIcon(app)}<span>${app.name}</span></button>`).join("") || `<div class="empty-state" style="min-height:150px;padding:10px"><div><strong>还没有常用应用</strong><span>在右侧收藏应用后会显示在这里。</span></div></div>`;
+    }
+
+    function launchApp(name) { showToast(`正在启动 ${name}…`); }
+    function togglePin(name) {
+      const app = apps.find(item => item.name === name);
+      if (!app) return;
+      app.favorite = !app.favorite;
+      renderApps();
+      showToast(app.favorite ? `已将 ${name} 添加到常用` : `已从常用中移除 ${name}`);
+    }
+
+    function renderPromptFilters() {
+      const groups = ["全部", "收藏", ...new Set(prompts.map(item => item.group))];
+      $("#promptFilters").innerHTML = groups.map(group => `<button class="filter-button ${group === promptFilter ? "active" : ""}" data-prompt-filter="${group}">${group}</button>`).join("");
+    }
+    function visiblePrompts() {
+      const query = $("#promptSearch").value.trim().toLowerCase();
+      return prompts.filter(item => (promptFilter === "全部" || (promptFilter === "收藏" ? item.favorite : item.group === promptFilter)) && `${item.title} ${item.body}`.toLowerCase().includes(query));
+    }
+    function renderPrompts() {
+      renderPromptFilters();
+      const visible = visiblePrompts();
+      if (!visible.some(item => item.id === promptSelection)) promptSelection = visible[0]?.id ?? null;
+      $("#promptList").innerHTML = visible.map(item => `<button class="library-row ${item.id === promptSelection ? "selected" : ""}" data-prompt-id="${item.id}"><span class="row-glyph"><svg class="icon"><use href="#i-spark"/></svg></span><span class="row-copy"><strong>${item.title}</strong><span>${item.group} · ${extractVariables(item.body).length} 个变量 · ${item.count} 次</span></span>${item.favorite ? `<span class="row-star" aria-label="已收藏">★</span>` : ""}</button>`).join("") || `<div class="empty-state"><div><strong>没有匹配的提示词</strong><span>调整搜索或新建一条提示词。</span><button class="button primary" style="margin-top:12px" id="emptyNewPrompt">新建提示词</button></div></div>`;
+      renderPromptDetail();
+    }
+    function renderPromptDetail() {
+      const item = prompts.find(prompt => prompt.id === promptSelection);
+      if (!item) {
+        $("#promptDetail").innerHTML = `<div class="empty-state"><div><strong>暂无预览</strong><span>选中一条提示词后在这里查看完整内容。</span></div></div>`;
+        $("#mobileUsePrompt").disabled = true; $("#mobileFavoritePrompt").disabled = true; return;
+      }
+      const variableCount = extractVariables(item.body).length;
+      $("#promptDetail").innerHTML = `<div class="detail-scroll"><div class="detail-kicker">${item.group}</div><h2 class="detail-title">${item.title}</h2><p class="detail-body">${escapeHTML(item.body)}</p><div class="detail-info"><div class="info-row"><span>变量</span><span>${variableCount} 个</span></div><div class="info-row"><span>使用</span><span>${item.count} 次</span></div><div class="info-row"><span>存储</span><span>仅本机</span></div></div></div><div class="detail-actions"><button class="button primary" id="usePrompt"><svg class="icon sm"><use href="#i-copy"/></svg><span>${variableCount ? "填写并复制" : "复制提示词"}</span></button><button class="button" id="favoritePrompt"><svg class="icon sm"><use href="#i-star"/></svg><span>${item.favorite ? "取消收藏" : "收藏"}</span></button></div>`;
+      $("#mobileUsePrompt span").textContent = variableCount ? "填写并复制" : "复制提示词";
+      $("#mobileFavoritePrompt span").textContent = item.favorite ? "取消收藏" : "收藏";
+      $("#mobileUsePrompt").disabled = false; $("#mobileFavoritePrompt").disabled = false;
+    }
+
+    function renderClipFilters() {
+      const groups = ["全部", "文字", "图片", "链接", "收藏"];
+      $("#clipFilters").innerHTML = groups.map(group => `<button class="filter-button ${group === clipFilter ? "active" : ""}" data-clip-filter="${group}">${group}</button>`).join("");
+    }
+    function visibleClips() {
+      const query = $("#clipSearch").value.trim().toLowerCase();
+      return clips.filter(item => (clipFilter === "全部" || (clipFilter === "收藏" ? item.favorite : item.label === clipFilter || (clipFilter === "文字" && item.kind === "code"))) && `${item.title} ${item.body}`.toLowerCase().includes(query));
+    }
+    function clipIcon(kind) { return kind === "image" ? "▧" : kind === "link" ? "↗" : kind === "code" ? "</>" : "¶"; }
+    function renderClips() {
+      renderClipFilters();
+      const visible = visibleClips();
+      if (!visible.some(item => item.id === clipSelection)) clipSelection = visible[0]?.id ?? null;
+      $("#clipList").innerHTML = visible.map(item => `<button class="library-row ${item.id === clipSelection ? "selected" : ""}" data-clip-id="${item.id}"><span class="row-glyph">${clipIcon(item.kind)}</span><span class="row-copy"><strong>${escapeHTML(item.title)}</strong><span>${item.source} · ${item.time}</span></span>${item.favorite ? `<span class="row-star" aria-label="已收藏">★</span>` : ""}</button>`).join("") || `<div class="empty-state"><div><strong>没有匹配的剪切板记录</strong><span>试试更短的关键词，或切换到其他分类。</span></div></div>`;
+      renderClipDetail();
+    }
+    function renderClipDetail() {
+      const item = clips.find(clip => clip.id === clipSelection);
+      if (!item) {
+        $("#clipDetail").innerHTML = `<div class="empty-state"><div><strong>暂无预览</strong><span>选中一条剪切板记录后查看完整内容。</span></div></div>`;
+        $("#mobileCopyClip").disabled = true; $("#mobileFavoriteClip").disabled = true; return;
+      }
+      $("#clipDetail").innerHTML = `<div class="detail-scroll"><div class="detail-kicker">${item.label}</div><h2 class="detail-title">${escapeHTML(item.title)}</h2><p class="detail-body" style="${item.kind === "code" ? "font-family:var(--mono)" : ""}">${escapeHTML(item.body)}</p><div class="detail-info"><div class="info-row"><span>类型</span><span>${item.label}</span></div><div class="info-row"><span>来源</span><span>${item.source}</span></div><div class="info-row"><span>复制时间</span><span>${item.time}</span></div></div></div><div class="detail-actions"><button class="button primary" id="copyClip"><svg class="icon sm"><use href="#i-copy"/></svg><span>复制到剪切板</span></button><button class="button" id="favoriteClip"><svg class="icon sm"><use href="#i-star"/></svg><span>${item.favorite ? "取消收藏" : "收藏"}</span></button></div>`;
+      $("#mobileFavoriteClip span").textContent = item.favorite ? "取消收藏" : "收藏";
+      $("#mobileCopyClip").disabled = false; $("#mobileFavoriteClip").disabled = false;
+    }
+
+    function extractVariables(body) { return [...new Set([...body.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map(match => match[1]))]; }
+    function escapeHTML(value) { return value.replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[character])); }
+    async function copyText(text, message) {
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast(message);
+        if ($("#autoCollapseSwitch").classList.contains("on")) setTimeout(() => setIslandState("compact"), 360);
+        return true;
+      }
+      catch { showToast("原型环境无法访问系统剪切板"); return false; }
+    }
+
+    function usePrompt(item) {
+      const variables = extractVariables(item.body);
+      if (!variables.length) {
+        copyText(item.body, `已复制提示词「${item.title}」`).then(copied => { if (copied) { item.count += 1; renderPrompts(); } });
+        return;
+      }
+      $("#runnerTitle").textContent = item.title;
+      $("#runnerDescription").textContent = `请填写 ${variables.length} 个变量。填写值只用于本次复制，不会修改原模板。`;
+      $("#runnerFields").innerHTML = variables.map((variable, index) => `<div class="field"><label for="runnerVariable${index}">${escapeHTML(variable)}</label><input id="runnerVariable${index}" data-variable="${escapeHTML(variable)}" required placeholder="输入${escapeHTML(variable)}"></div>`).join("");
+      $("#runnerModal").dataset.promptId = String(item.id);
+      $("#runnerModal").classList.add("open");
+      setTimeout(() => $("#runnerFields input")?.focus(), 0);
+    }
+
+    async function toggleCamera() {
+      if (cameraStream) { stopCamera(); return; }
+      const status = $("#cameraStatus");
+      const button = $("#toggleCamera span");
+      status.textContent = "正在请求摄像头权限…";
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        const video = document.createElement("video");
+        video.autoplay = true; video.muted = true; video.playsInline = true; video.srcObject = cameraStream;
+        $("#cameraPreview").replaceChildren(video);
+        status.textContent = "摄像头正常 · 画面仅本机预览";
+        button.textContent = "停止预览";
+      } catch (error) {
+        status.textContent = error?.name === "NotAllowedError" ? "未获得摄像头权限，请在系统设置中允许" : "无法启动摄像头";
+        showToast(status.textContent);
+      }
+    }
+    function stopCamera() {
+      if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
+      cameraStream = null;
+      $("#cameraPreview").innerHTML = "<span>预览未开启</span>";
+      $("#cameraStatus").textContent = "尚未请求摄像头权限";
+      $("#toggleCamera span").textContent = "启动摄像头";
+    }
+
+    function setTheme(theme) {
+      document.documentElement.dataset.theme = theme;
+      localStorage.setItem("jaimo-prototype-theme", theme);
+      $$("[data-theme-choice]").forEach(button => button.classList.toggle("active", button.dataset.themeChoice === theme));
+    }
+
+    function setupWidgetEditing() {
+      const grid = $("#homeGrid");
+      const updateRestoreBar = () => {
+        const hidden = $$(".widget[hidden]", grid);
+        $("#restoreBar").classList.toggle("show", hidden.length > 0);
+        $("#restoreList").innerHTML = hidden.map(widget => `<button class="button" data-restore="${widget.dataset.widget}">${widget.dataset.label}</button>`).join("");
+      };
+      $("#customizeWidgets").addEventListener("click", event => {
+        grid.classList.toggle("editing-widgets");
+        event.currentTarget.classList.toggle("primary", grid.classList.contains("editing-widgets"));
+        event.currentTarget.querySelector("span").textContent = grid.classList.contains("editing-widgets") ? "完成" : "管理组件";
+      });
+      grid.addEventListener("click", event => {
+        const widget = event.target.closest(".widget");
+        if (!widget) return;
+        if (event.target.closest(".move-up")) {
+          const previous = widget.previousElementSibling;
+          if (previous) grid.insertBefore(widget, previous);
+        } else if (event.target.closest(".move-down")) {
+          const next = widget.nextElementSibling;
+          if (next) grid.insertBefore(next, widget);
+        } else if (event.target.closest(".hide-widget")) {
+          widget.hidden = true; updateRestoreBar();
+        }
+      });
+      $("#restoreList").addEventListener("click", event => {
+        const button = event.target.closest("[data-restore]");
+        if (!button) return;
+        const widget = $(`[data-widget="${button.dataset.restore}"]`, grid);
+        if (widget) widget.hidden = false;
+        updateRestoreBar();
+      });
+    }
+
+    $("#expandIsland").addEventListener("click", () => setIslandState("expanded"));
+    $("#collapseIsland").addEventListener("click", () => setIslandState("compact"));
+    $$(".nav-button").forEach(button => button.addEventListener("click", () => switchPage(button.dataset.page)));
+    $("#quickNote").addEventListener("click", () => { setIslandState("expanded"); switchPage("home"); setTimeout(() => $("#quickNoteArea").focus(), 0); });
+    $("#quickCamera").addEventListener("click", () => { setIslandState("expanded"); switchPage("home"); setTimeout(() => $("#toggleCamera").focus(), 0); });
+    $("#openSettings").addEventListener("click", () => $("#settingsModal").classList.add("open"));
+    $$(".close-modal").forEach(button => button.addEventListener("click", () => button.closest(".modal").classList.remove("open")));
+    $$(".switch").forEach(button => button.addEventListener("click", () => { button.classList.toggle("on"); button.setAttribute("aria-checked", String(button.classList.contains("on"))); }));
+    $$("[data-theme-choice]").forEach(button => button.addEventListener("click", () => setTheme(button.dataset.themeChoice)));
+    $("#toggleCamera").addEventListener("click", toggleCamera);
+    $("#appSearch").addEventListener("input", renderApps);
+    $("#appGrid").addEventListener("click", event => { const pin = event.target.closest("[data-pin]"); if (pin) { event.preventDefault(); event.stopPropagation(); togglePin(pin.dataset.pin); return; } const tile = event.target.closest("[data-app]"); if (tile) launchApp(tile.dataset.app); });
+    $("#favoritesList").addEventListener("click", event => { const app = event.target.closest("[data-app]"); if (app) launchApp(app.dataset.app); });
+    $$("[data-launch]").forEach(row => row.addEventListener("click", () => launchApp(row.dataset.launch)));
+    $("#promptSearch").addEventListener("input", renderPrompts);
+    $("#promptFilters").addEventListener("click", event => { const button = event.target.closest("[data-prompt-filter]"); if (button) { promptFilter = button.dataset.promptFilter; renderPrompts(); } });
+    $("#promptList").addEventListener("click", event => { if (event.target.closest("#emptyNewPrompt")) { $("#promptModal").classList.add("open"); return; } const row = event.target.closest("[data-prompt-id]"); if (row) { promptSelection = Number(row.dataset.promptId); renderPrompts(); } });
+    $("#promptDetail").addEventListener("click", event => {
+      const item = prompts.find(prompt => prompt.id === promptSelection); if (!item) return;
+      if (event.target.closest("#usePrompt")) usePrompt(item);
+      if (event.target.closest("#favoritePrompt")) { item.favorite = !item.favorite; renderPrompts(); showToast(item.favorite ? "已收藏提示词" : "已取消收藏"); }
+    });
+    $("#mobileUsePrompt").addEventListener("click", () => {
+      const item = prompts.find(prompt => prompt.id === promptSelection); if (item) usePrompt(item);
+    });
+    $("#mobileFavoritePrompt").addEventListener("click", () => {
+      const item = prompts.find(prompt => prompt.id === promptSelection); if (!item) return;
+      item.favorite = !item.favorite; renderPrompts(); showToast(item.favorite ? "已收藏提示词" : "已取消收藏");
+    });
+    $("#newPrompt").addEventListener("click", () => $("#promptModal").classList.add("open"));
+    $("#promptForm").addEventListener("submit", event => {
+      event.preventDefault();
+      prompts.unshift({ id: Date.now(), title: $("#promptTitle").value.trim(), group: $("#promptGroup").value.trim(), body: $("#promptBody").value.trim(), favorite: false, count: 0 });
+      promptFilter = "全部"; promptSelection = prompts[0].id; renderPrompts();
+      $("#promptModal").classList.remove("open"); event.currentTarget.reset(); $("#promptGroup").value = "写作"; showToast("已新建提示词");
+    });
+    $("#runnerForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      const item = prompts.find(prompt => prompt.id === Number($("#runnerModal").dataset.promptId));
+      if (!item) return;
+      const values = Object.fromEntries($$("#runnerFields input").map(input => [input.dataset.variable, input.value]));
+      const rendered = item.body.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_, name) => values[name.trim()] ?? "");
+      $("#runnerModal").classList.remove("open");
+      const copied = await copyText(rendered, `已复制提示词「${item.title}」`);
+      if (copied) { item.count += 1; renderPrompts(); }
+    });
+    $("#clipSearch").addEventListener("input", renderClips);
+    $("#clipFilters").addEventListener("click", event => { const button = event.target.closest("[data-clip-filter]"); if (button) { clipFilter = button.dataset.clipFilter; renderClips(); } });
+    $("#clipList").addEventListener("click", event => { const row = event.target.closest("[data-clip-id]"); if (row) { clipSelection = Number(row.dataset.clipId); renderClips(); } });
+    $("#clipDetail").addEventListener("click", event => {
+      const item = clips.find(clip => clip.id === clipSelection); if (!item) return;
+      if (event.target.closest("#copyClip")) copyText(item.body, `已复制到剪切板 · ${item.body.length} 个字符`);
+      if (event.target.closest("#favoriteClip")) { item.favorite = !item.favorite; renderClips(); showToast(item.favorite ? "已收藏剪切板记录" : "已取消收藏"); }
+    });
+    $("#mobileCopyClip").addEventListener("click", () => {
+      const item = clips.find(clip => clip.id === clipSelection); if (item) copyText(item.body, `已复制到剪切板 · ${item.body.length} 个字符`);
+    });
+    $("#mobileFavoriteClip").addEventListener("click", () => {
+      const item = clips.find(clip => clip.id === clipSelection); if (!item) return;
+      item.favorite = !item.favorite; renderClips(); showToast(item.favorite ? "已收藏剪切板记录" : "已取消收藏");
+    });
+    $("#quickNoteArea").addEventListener("input", event => {
+      localStorage.setItem("jaimo-prototype-note", event.target.value);
+      $("#noteStatus").textContent = "已保存 · 仅本机";
+    });
+    document.addEventListener("keydown", event => {
+      if (event.altKey && event.code === "Space") { event.preventDefault(); setIslandState(island.classList.contains("hidden") ? "compact" : "hidden"); }
+      if (event.key === "Escape") {
+        const modal = $(".modal.open"); if (modal) { modal.classList.remove("open"); return; }
+        if (island.classList.contains("expanded")) setIslandState("compact");
+        else if (island.classList.contains("compact")) setIslandState("hidden");
+      }
+      if (event.metaKey && /^[1-4]$/.test(event.key)) { event.preventDefault(); setIslandState("expanded"); switchPage(["home", "apps", "prompts", "clipboard"][Number(event.key) - 1]); }
+    });
+
+    const savedNote = localStorage.getItem("jaimo-prototype-note");
+    if (savedNote !== null) $("#quickNoteArea").value = savedNote;
+    setTheme(localStorage.getItem("jaimo-prototype-theme") || "dark");
+    setupWidgetEditing();
+    renderApps(); renderPrompts(); renderClips(); updateClock(); setInterval(updateClock, 1000);
+  </script>
+</body>
+</html>

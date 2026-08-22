@@ -10,3 +10,4 @@ DerivedData/
 *.provisionprofile
 .env
 .env.*
+lark-*.png

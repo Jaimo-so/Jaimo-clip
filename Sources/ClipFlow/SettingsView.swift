@@ -54,7 +54,7 @@ struct SettingsView: View {
                             }
                             rowDivider(theme)
                             settingRow("历史记录上限", theme: theme) {
-                                valueText("500 条", theme: theme)
+                                valueText("\(AppModel.historyLimit) 条", theme: theme)
                             }
                             rowDivider(theme)
                             settingRow("外观", theme: theme) {

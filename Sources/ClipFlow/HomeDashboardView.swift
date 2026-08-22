@@ -1,0 +1,585 @@
+import AppKit
+import AVFoundation
+import SwiftUI
+
+@MainActor
+final class HomeDashboardModel: ObservableObject {
+    enum WidgetID: String, CaseIterable, Identifiable {
+        case clock
+        case quickNote
+        case audioRecorder
+        case camera
+        case recentApplications
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .clock: return "时间"
+            case .quickNote: return "快速便签"
+            case .audioRecorder: return "录音"
+            case .camera: return "摄像头检查"
+            case .recentApplications: return "最近使用"
+            }
+        }
+    }
+
+    @Published var quickNote: String {
+        didSet { defaults.set(quickNote, forKey: Key.quickNote) }
+    }
+    @Published private(set) var widgetOrder: [WidgetID]
+    @Published private(set) var hiddenWidgets: Set<WidgetID>
+
+    private enum Key {
+        static let quickNote = "home.quickNote"
+        static let widgetOrder = "home.widgetOrder"
+        static let hiddenWidgets = "home.hiddenWidgets"
+    }
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        quickNote = defaults.string(forKey: Key.quickNote) ?? ""
+
+        let savedOrder = defaults.stringArray(forKey: Key.widgetOrder) ?? []
+        let decodedOrder = savedOrder.compactMap(WidgetID.init(rawValue:))
+        let missing = WidgetID.allCases.filter { !decodedOrder.contains($0) }
+        widgetOrder = decodedOrder + missing
+
+        let hidden = defaults.stringArray(forKey: Key.hiddenWidgets) ?? []
+        hiddenWidgets = Set(hidden.compactMap(WidgetID.init(rawValue:)))
+    }
+
+    var visibleWidgets: [WidgetID] {
+        widgetOrder.filter { !hiddenWidgets.contains($0) }
+    }
+
+    func move(_ widget: WidgetID, by offset: Int) {
+        guard let index = widgetOrder.firstIndex(of: widget) else { return }
+        let target = min(max(index + offset, 0), widgetOrder.count - 1)
+        guard target != index else { return }
+        widgetOrder.remove(at: index)
+        widgetOrder.insert(widget, at: target)
+        persistLayout()
+    }
+
+    func hide(_ widget: WidgetID) {
+        hiddenWidgets.insert(widget)
+        persistLayout()
+    }
+
+    func restore(_ widget: WidgetID) {
+        hiddenWidgets.remove(widget)
+        persistLayout()
+    }
+
+    private func persistLayout() {
+        defaults.set(widgetOrder.map(\.rawValue), forKey: Key.widgetOrder)
+        defaults.set(hiddenWidgets.map(\.rawValue).sorted(), forKey: Key.hiddenWidgets)
+    }
+}
+
+struct HomeDashboardView: View {
+    @ObservedObject var model: HomeDashboardModel
+    @ObservedObject var applicationsModel: ApplicationsModel
+    let onOpenApplications: () -> Void
+
+    @StateObject private var cameraModel = CameraCheckModel()
+    @StateObject private var audioRecorderModel = AudioRecorderModel()
+    @State private var editingWidgets = false
+    @FocusState private var noteFocused: Bool
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let theme = ClipFlowTheme(scheme: colorScheme)
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("今天也是高效的一天")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(theme.muted)
+                    Text(greeting)
+                        .font(.system(size: 18, weight: .semibold))
+                }
+                Spacer()
+                Button {
+                    editingWidgets.toggle()
+                } label: {
+                    Label(editingWidgets ? "完成" : "管理组件", systemImage: editingWidgets ? "checkmark" : "slider.horizontal.3")
+                }
+                .buttonStyle(GlassButtonStyle(kind: editingWidgets ? .primary : .normal))
+                .fixedSize()
+            }
+            .padding(.horizontal, 18)
+            .frame(height: 72)
+
+            Divider().overlay(theme.weakHairline)
+
+            GeometryReader { proxy in
+                ScrollView(.vertical) {
+                    VStack(spacing: 12) {
+                        if !model.hiddenWidgets.isEmpty {
+                            restoreBar(theme)
+                        }
+
+                        LazyVGrid(
+                            columns: proxy.size.width >= 720
+                                ? [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+                                : [GridItem(.flexible())],
+                            spacing: 12
+                        ) {
+                            ForEach(model.visibleWidgets) { widget in
+                                widgetView(widget, theme: theme)
+                                    .frame(minHeight: 176)
+                            }
+                        }
+                    }
+                    .padding(18)
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .jaimoFocusQuickNote)) { _ in
+            noteFocused = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .jaimoStartCamera)) { _ in
+            cameraModel.start()
+        }
+        .onDisappear {
+            cameraModel.stop()
+            audioRecorderModel.finishIfNeeded()
+        }
+    }
+
+    private var greeting: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        if hour < 6 { return "夜深了，Jaimo" }
+        if hour < 12 { return "上午好，Jaimo" }
+        if hour < 18 { return "下午好，Jaimo" }
+        return "晚上好，Jaimo"
+    }
+
+    private func restoreBar(_ theme: ClipFlowTheme) -> some View {
+        HStack(spacing: 8) {
+            Text("已隐藏")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.muted)
+            ForEach(model.widgetOrder.filter { model.hiddenWidgets.contains($0) }) { widget in
+                Button(widget.title) { model.restore(widget) }
+                    .buttonStyle(GlassButtonStyle(kind: .normal))
+                    .fixedSize()
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .stroke(theme.hairline, style: StrokeStyle(lineWidth: 0.5, dash: [4, 4]))
+        )
+    }
+
+    @ViewBuilder
+    private func widgetView(_ widget: HomeDashboardModel.WidgetID, theme: ClipFlowTheme) -> some View {
+        switch widget {
+        case .clock:
+            IslandWidgetCard(
+                title: widget.title,
+                subtitle: "上海 · 中国标准时间",
+                widget: widget,
+                editing: editingWidgets,
+                model: model
+            ) {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(context.date, format: .dateTime.hour().minute())
+                            .font(.system(size: 44, weight: .semibold))
+                            .monospacedDigit()
+                        Text(context.date.formatted(.dateTime.year().month(.wide).day().weekday(.wide)))
+                            .font(.system(size: 12))
+                            .foregroundStyle(theme.foregroundSecondary)
+                        Text(TimeZone.current.identifier)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(theme.muted)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+        case .quickNote:
+            IslandWidgetCard(
+                title: widget.title,
+                subtitle: "内容自动保存在本机",
+                widget: widget,
+                editing: editingWidgets,
+                model: model
+            ) {
+                TextEditor(text: $model.quickNote)
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.foregroundSecondary)
+                    .scrollContentBackground(.hidden)
+                    .focused($noteFocused)
+                    .overlay(alignment: .topLeading) {
+                        if model.quickNote.isEmpty {
+                            Text("记下稍后要处理的事…")
+                                .font(.system(size: 12))
+                                .foregroundStyle(theme.muted)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 8)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .frame(minHeight: 112)
+                    .accessibilityLabel("快速便签")
+            }
+
+        case .audioRecorder:
+            IslandWidgetCard(
+                title: widget.title,
+                subtitle: audioRecorderModel.statusText,
+                widget: widget,
+                editing: editingWidgets,
+                model: model
+            ) {
+                AudioRecorderWidget(model: audioRecorderModel)
+            }
+
+        case .camera:
+            IslandWidgetCard(
+                title: widget.title,
+                subtitle: cameraModel.statusText,
+                widget: widget,
+                editing: editingWidgets,
+                model: model
+            ) {
+                HStack(spacing: 14) {
+                    VStack(alignment: .leading, spacing: 9) {
+                        Text("会议前快速确认画面")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("画面只在本机预览，不录制、不保存、不上传。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.muted)
+                            .lineSpacing(4)
+
+                        HStack(spacing: 7) {
+                            Button {
+                                cameraModel.isRunning ? cameraModel.stop() : cameraModel.start()
+                            } label: {
+                                Label(cameraModel.isRunning ? "停止预览" : "启动摄像头", systemImage: "video")
+                            }
+                            .buttonStyle(GlassButtonStyle(kind: .primary))
+                            .fixedSize()
+
+                            if cameraModel.canOpenSettings {
+                                Button("打开系统设置", action: cameraModel.openPrivacySettings)
+                                    .buttonStyle(GlassButtonStyle(kind: .normal))
+                                    .fixedSize()
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Group {
+                        if cameraModel.isRunning {
+                            CameraPreviewView(session: cameraModel.session)
+                        } else {
+                            VStack(spacing: 7) {
+                                Image(systemName: "video.slash")
+                                    .font(.system(size: 20))
+                                Text("预览未开启")
+                                    .font(.system(size: 10.5))
+                            }
+                            .foregroundStyle(theme.muted)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(theme.glassSecondary)
+                        }
+                    }
+                    .frame(width: 150, height: 112)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.hairline, lineWidth: 0.5))
+                }
+            }
+
+        case .recentApplications:
+            IslandWidgetCard(
+                title: widget.title,
+                subtitle: "从 Jaimo 启动的本机应用",
+                widget: widget,
+                editing: editingWidgets,
+                model: model
+            ) {
+                if applicationsModel.recentApplications.isEmpty {
+                    VStack(spacing: 9) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 20))
+                            .foregroundStyle(theme.muted)
+                        Text("还没有启动记录")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(theme.foregroundSecondary)
+                        Button("打开应用程序", action: onOpenApplications)
+                            .buttonStyle(GlassButtonStyle(kind: .normal))
+                            .fixedSize()
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 110)
+                } else {
+                    VStack(spacing: 4) {
+                        ForEach(applicationsModel.recentApplications.prefix(3)) { application in
+                            Button {
+                                applicationsModel.launch(application)
+                            } label: {
+                                HStack(spacing: 9) {
+                                    Image(nsImage: application.icon)
+                                        .resizable()
+                                        .interpolation(.high)
+                                        .frame(width: 30, height: 30)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(application.displayName)
+                                            .font(.system(size: 11.5, weight: .medium))
+                                            .lineLimit(1)
+                                        Text(application.relativeLaunchTime)
+                                            .font(.system(size: 9.5))
+                                            .foregroundStyle(theme.muted)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "arrow.up.forward")
+                                        .font(.system(size: 10.5))
+                                        .foregroundStyle(theme.muted)
+                                }
+                                .padding(7)
+                                .contentShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            .buttonStyle(IslandRecentRowStyle())
+                            .accessibilityLabel("启动 \(application.displayName)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct IslandWidgetCard<Content: View>: View {
+    let title: String
+    let subtitle: String
+    let widget: HomeDashboardModel.WidgetID
+    let editing: Bool
+    @ObservedObject var model: HomeDashboardModel
+    @ViewBuilder let content: () -> Content
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let theme = ClipFlowTheme(scheme: colorScheme)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 12.5, weight: .semibold))
+                    Text(subtitle)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(theme.muted)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 6)
+                if editing {
+                    HStack(spacing: 2) {
+                        editButton("arrow.up", label: "向前移动 \(title)") { model.move(widget, by: -1) }
+                        editButton("arrow.down", label: "向后移动 \(title)") { model.move(widget, by: 1) }
+                        editButton("eye.slash", label: "隐藏 \(title)") { model.hide(widget) }
+                    }
+                }
+            }
+            content()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .background(theme.glassSecondary.opacity(0.72))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(theme.hairline, style: editing
+                        ? StrokeStyle(lineWidth: 0.7, dash: [4, 4])
+                        : StrokeStyle(lineWidth: 0.5))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func editButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 10.5))
+                .frame(width: 26, height: 26)
+        }
+        .buttonStyle(IslandWidgetEditButtonStyle())
+        .accessibilityLabel(label)
+        .help(label)
+    }
+}
+
+private struct IslandWidgetEditButtonStyle: ButtonStyle {
+    @Environment(\.colorScheme) private var colorScheme
+
+    func makeBody(configuration: Configuration) -> some View {
+        let theme = ClipFlowTheme(scheme: colorScheme)
+        configuration.label
+            .foregroundStyle(theme.muted)
+            .background(configuration.isPressed ? theme.chipHigh : theme.chip)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct IslandRecentRowStyle: ButtonStyle {
+    @Environment(\.colorScheme) private var colorScheme
+
+    func makeBody(configuration: Configuration) -> some View {
+        let theme = ClipFlowTheme(scheme: colorScheme)
+        configuration.label
+            .background(configuration.isPressed ? theme.chipHigh : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+@MainActor
+final class CameraCheckModel: ObservableObject {
+    enum Status: Equatable {
+        case idle
+        case requesting
+        case running
+        case denied
+        case unavailable
+        case failed(String)
+    }
+
+    @Published private(set) var status: Status = .idle
+    let session = AVCaptureSession()
+
+    private let sessionQueue = DispatchQueue(label: "com.clipflow.camera-preview", qos: .userInitiated)
+    private var configured = false
+
+    var isRunning: Bool { status == .running }
+    var canOpenSettings: Bool { status == .denied }
+
+    var statusText: String {
+        switch status {
+        case .idle: return "尚未请求摄像头权限"
+        case .requesting: return "正在准备摄像头…"
+        case .running: return "摄像头正常 · 画面仅本机预览"
+        case .denied: return "未获得摄像头权限"
+        case .unavailable: return "没有可用的摄像头"
+        case .failed(let message): return message
+        }
+    }
+
+    func start() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            configureAndStart()
+        case .notDetermined:
+            status = .requesting
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    granted ? self.configureAndStart() : self.setDenied()
+                }
+            }
+        case .denied, .restricted:
+            status = .denied
+        @unknown default:
+            status = .failed("无法读取摄像头权限")
+        }
+    }
+
+    func stop() {
+        guard session.isRunning || status == .running || status == .requesting else { return }
+        status = .idle
+        let session = session
+        sessionQueue.async {
+            if session.isRunning { session.stopRunning() }
+        }
+    }
+
+    func openPrivacySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func configureAndStart() {
+        guard status != .running else { return }
+        status = .requesting
+        let session = session
+        let needsConfiguration = !configured
+        configured = true
+
+        sessionQueue.async { [weak self] in
+            do {
+                if needsConfiguration {
+                    session.beginConfiguration()
+                    session.sessionPreset = .medium
+                    guard let device = AVCaptureDevice.default(for: .video) else {
+                        session.commitConfiguration()
+                        throw CameraError.unavailable
+                    }
+                    let input = try AVCaptureDeviceInput(device: device)
+                    guard session.canAddInput(input) else {
+                        session.commitConfiguration()
+                        throw CameraError.inputUnavailable
+                    }
+                    session.addInput(input)
+                    session.commitConfiguration()
+                }
+                if !session.isRunning { session.startRunning() }
+                DispatchQueue.main.async { self?.status = .running }
+            } catch CameraError.unavailable {
+                DispatchQueue.main.async {
+                    self?.configured = false
+                    self?.status = .unavailable
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self?.configured = false
+                    self?.status = .failed("无法启动摄像头")
+                }
+            }
+        }
+    }
+
+    private func setDenied() {
+        status = .denied
+    }
+
+    private enum CameraError: Error {
+        case unavailable
+        case inputUnavailable
+    }
+}
+
+private struct CameraPreviewView: NSViewRepresentable {
+    let session: AVCaptureSession
+
+    func makeNSView(context: Context) -> CameraPreviewNSView {
+        let view = CameraPreviewNSView()
+        view.previewLayer.session = session
+        return view
+    }
+
+    func updateNSView(_ nsView: CameraPreviewNSView, context: Context) {
+        nsView.previewLayer.session = session
+    }
+}
+
+private final class CameraPreviewNSView: NSView {
+    let previewLayer = AVCaptureVideoPreviewLayer()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        previewLayer.videoGravity = .resizeAspectFill
+        layer?.addSublayer(previewLayer)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func layout() {
+        super.layout()
+        previewLayer.frame = bounds
+    }
+}
