@@ -5,6 +5,7 @@ struct LocalApplication: Identifiable {
     let id: String
     let bundleIdentifier: String
     let displayName: String
+    let originalBundleName: String
     let bundleURL: URL
     let icon: NSImage
     let version: String?
@@ -22,27 +23,36 @@ struct LocalApplication: Identifiable {
     }
 }
 
+struct UnavailableFavoriteApplication: Identifiable {
+    let id: String
+    let displayName: String
+}
+
 @MainActor
 final class ApplicationsModel: ObservableObject {
     @Published private(set) var applications: [LocalApplication] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var unavailableFavorites: [UnavailableFavoriteApplication] = []
     @Published var query = ""
 
     private enum Key {
         static let favorites = "applications.favorites"
+        static let favoriteNames = "applications.favoriteNames"
         static let lastLaunch = "applications.lastLaunch"
         static let launchCount = "applications.launchCount"
     }
 
     private let defaults: UserDefaults
     private var favoriteIDs: Set<String>
+    private var favoriteNamesByID: [String: String]
     private var lastLaunchByID: [String: Double]
     private var launchCountByID: [String: Int]
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         favoriteIDs = Set(defaults.stringArray(forKey: Key.favorites) ?? [])
+        favoriteNamesByID = defaults.dictionary(forKey: Key.favoriteNames) as? [String: String] ?? [:]
         lastLaunchByID = defaults.dictionary(forKey: Key.lastLaunch)?.reduce(into: [:]) { result, pair in
             if let value = pair.value as? Double { result[pair.key] = value }
             else if let value = pair.value as? NSNumber { result[pair.key] = value.doubleValue }
@@ -58,6 +68,7 @@ final class ApplicationsModel: ObservableObject {
         guard !needle.isEmpty else { return applications }
         return applications.filter {
             $0.displayName.localizedCaseInsensitiveContains(needle)
+                || $0.originalBundleName.localizedCaseInsensitiveContains(needle)
                 || $0.bundleIdentifier.localizedCaseInsensitiveContains(needle)
         }
     }
@@ -92,6 +103,7 @@ final class ApplicationsModel: ObservableObject {
                         id: record.id,
                         bundleIdentifier: record.bundleIdentifier,
                         displayName: record.displayName,
+                        originalBundleName: record.originalBundleName,
                         bundleURL: record.url,
                         icon: NSWorkspace.shared.icon(forFile: record.url.path),
                         version: record.version,
@@ -100,6 +112,7 @@ final class ApplicationsModel: ObservableObject {
                         launchCount: self.launchCountByID[record.id] ?? 0
                     )
                 }
+                self.rebuildUnavailableFavorites()
                 self.isLoading = false
                 if records.isEmpty {
                     self.errorMessage = "未在本机应用目录中找到可启动应用"
@@ -111,13 +124,29 @@ final class ApplicationsModel: ObservableObject {
     func toggleFavorite(_ application: LocalApplication) {
         if favoriteIDs.contains(application.id) {
             favoriteIDs.remove(application.id)
+            favoriteNamesByID.removeValue(forKey: application.id)
         } else {
             favoriteIDs.insert(application.id)
+            favoriteNamesByID[application.id] = application.displayName
         }
         defaults.set(favoriteIDs.sorted(), forKey: Key.favorites)
+        defaults.set(favoriteNamesByID, forKey: Key.favoriteNames)
         updateApplication(id: application.id) { item in
             item.isFavorite = favoriteIDs.contains(application.id)
         }
+        rebuildUnavailableFavorites()
+    }
+
+    func removeUnavailableFavorite(_ application: UnavailableFavoriteApplication) {
+        favoriteIDs.remove(application.id)
+        favoriteNamesByID.removeValue(forKey: application.id)
+        defaults.set(favoriteIDs.sorted(), forKey: Key.favorites)
+        defaults.set(favoriteNamesByID, forKey: Key.favoriteNames)
+        rebuildUnavailableFavorites()
+    }
+
+    func clearError() {
+        errorMessage = nil
     }
 
     func launch(_ application: LocalApplication) {
@@ -148,12 +177,26 @@ final class ApplicationsModel: ObservableObject {
         guard let index = applications.firstIndex(where: { $0.id == id }) else { return }
         mutate(&applications[index])
     }
+
+    private func rebuildUnavailableFavorites() {
+        let availableIDs = Set(applications.map(\.id))
+        unavailableFavorites = favoriteIDs
+            .subtracting(availableIDs)
+            .map { id in
+                UnavailableFavoriteApplication(
+                    id: id,
+                    displayName: favoriteNamesByID[id] ?? id
+                )
+            }
+            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+    }
 }
 
 private struct ApplicationRecord {
     let id: String
     let bundleIdentifier: String
     let displayName: String
+    let originalBundleName: String
     let url: URL
     let version: String?
 }
@@ -192,9 +235,10 @@ private enum ApplicationCatalog {
 
     private static func makeRecord(url: URL) -> ApplicationRecord? {
         guard let bundle = Bundle(url: url) else { return nil }
-        let displayName = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
-            ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
+        let originalBundleName = (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
             ?? url.deletingPathExtension().lastPathComponent
+        let displayName = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+            ?? originalBundleName
         let bundleIdentifier = bundle.bundleIdentifier ?? url.standardizedFileURL.path
         let id = bundle.bundleIdentifier ?? "path:\(url.standardizedFileURL.path)"
         let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
@@ -202,6 +246,7 @@ private enum ApplicationCatalog {
             id: id,
             bundleIdentifier: bundleIdentifier,
             displayName: displayName,
+            originalBundleName: originalBundleName,
             url: url,
             version: version
         )
@@ -277,7 +322,7 @@ struct ApplicationsView: View {
                 .padding(.horizontal, 7)
                 .padding(.bottom, 8)
 
-            if model.favoriteApplications.isEmpty {
+            if model.favoriteApplications.isEmpty && model.unavailableFavorites.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "star")
                         .font(.system(size: 18))
@@ -294,24 +339,69 @@ struct ApplicationsView: View {
                 ScrollView(.vertical) {
                     LazyVStack(spacing: 3) {
                         ForEach(model.favoriteApplications) { application in
-                            Button {
-                                model.launch(application)
-                            } label: {
-                                HStack(spacing: 9) {
-                                    Image(nsImage: application.icon)
-                                        .resizable()
-                                        .interpolation(.high)
-                                        .frame(width: 30, height: 30)
-                                    Text(application.displayName)
-                                        .font(.system(size: 11.5))
-                                        .lineLimit(1)
-                                    Spacer(minLength: 0)
+                            HStack(spacing: 4) {
+                                Button {
+                                    model.launch(application)
+                                } label: {
+                                    HStack(spacing: 9) {
+                                        Image(nsImage: application.icon)
+                                            .resizable()
+                                            .interpolation(.high)
+                                            .frame(width: 30, height: 30)
+                                        Text(application.displayName)
+                                            .font(.system(size: 11.5))
+                                            .lineLimit(1)
+                                        Spacer(minLength: 0)
+                                    }
+                                    .padding(7)
+                                    .contentShape(RoundedRectangle(cornerRadius: 10))
                                 }
-                                .padding(7)
-                                .contentShape(RoundedRectangle(cornerRadius: 10))
+                                .buttonStyle(ApplicationRowButtonStyle())
+                                .accessibilityLabel("启动 \(application.displayName)")
+
+                                Button {
+                                    model.toggleFavorite(application)
+                                } label: {
+                                    Image(systemName: "star.fill")
+                                        .foregroundStyle(theme.star)
+                                        .frame(width: 26, height: 26)
+                                }
+                                .buttonStyle(ApplicationSmallButtonStyle())
+                                .accessibilityLabel("取消收藏 \(application.displayName)")
+                                .help("取消收藏")
                             }
-                            .buttonStyle(ApplicationRowButtonStyle())
-                            .accessibilityLabel("启动 \(application.displayName)")
+                        }
+
+                        ForEach(model.unavailableFavorites) { application in
+                            HStack(spacing: 8) {
+                                Image(systemName: "app.dashed")
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(theme.muted)
+                                    .frame(width: 30, height: 30)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(application.displayName)
+                                        .font(.system(size: 11))
+                                        .lineLimit(1)
+                                    Text("应用不可用")
+                                        .font(.system(size: 9.5))
+                                        .foregroundStyle(theme.danger)
+                                }
+                                Spacer(minLength: 0)
+                                Button {
+                                    model.removeUnavailableFavorite(application)
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .frame(width: 26, height: 26)
+                                }
+                                .buttonStyle(ApplicationSmallButtonStyle())
+                                .accessibilityLabel("移除不可用收藏 \(application.displayName)")
+                                .help("移除收藏")
+                            }
+                            .padding(7)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(theme.hairline, lineWidth: 0.5)
+                            )
                         }
                     }
                 }
@@ -348,6 +438,12 @@ struct ApplicationsView: View {
                     Text(errorMessage)
                         .lineLimit(2)
                     Spacer()
+                    Button(action: model.clearError) {
+                        Image(systemName: "xmark")
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("关闭应用错误提示")
                 }
                 .font(.system(size: 11))
                 .foregroundStyle(theme.danger)
@@ -437,20 +533,19 @@ private struct ApplicationTile: View {
             .buttonStyle(.plain)
             .accessibilityLabel("启动 \(application.displayName)")
 
-            if hovering || application.isFavorite {
-                Button {
-                    model.toggleFavorite(application)
-                } label: {
-                    Image(systemName: application.isFavorite ? "star.fill" : "star")
-                        .font(.system(size: 11))
-                        .foregroundStyle(application.isFavorite ? theme.star : theme.muted)
-                        .frame(width: 26, height: 26)
-                }
-                .buttonStyle(ApplicationSmallButtonStyle())
-                .accessibilityLabel(application.isFavorite ? "取消收藏 \(application.displayName)" : "收藏 \(application.displayName)")
-                .help(application.isFavorite ? "取消收藏" : "收藏")
-                .padding(4)
+            Button {
+                model.toggleFavorite(application)
+            } label: {
+                Image(systemName: application.isFavorite ? "star.fill" : "star")
+                    .font(.system(size: 11))
+                    .foregroundStyle(application.isFavorite ? theme.star : theme.muted)
+                    .frame(width: 26, height: 26)
             }
+            .buttonStyle(ApplicationSmallButtonStyle())
+            .opacity(application.isFavorite || hovering ? 1 : 0.72)
+            .accessibilityLabel(application.isFavorite ? "取消收藏 \(application.displayName)" : "收藏 \(application.displayName)")
+            .help(application.isFavorite ? "取消收藏" : "收藏")
+            .padding(4)
         }
         .background(hovering ? theme.chip : Color.clear)
         .overlay(RoundedRectangle(cornerRadius: 13).stroke(hovering ? theme.hairline : .clear, lineWidth: 0.5))

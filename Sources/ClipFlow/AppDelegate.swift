@@ -31,7 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         do {
             hotKeyManager = try HotKeyManager { [weak panelController] in
-                DispatchQueue.main.async { panelController?.toggle() }
+                DispatchQueue.main.async { panelController?.toggleHotKey() }
             }
         } catch {
             model.showToast(error.localizedDescription)
@@ -43,10 +43,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             model?.updateManager.checkIfNeeded()
         }
 
-        // 首次启动直接显示完整工具站完成可发现性引导。
-        // 后续登录启动保持隐藏，由 ⌥Space 或菜单栏直接唤起完整工具站。
+        // 首次启动只展示一次紧凑灵动岛，后续登录启动保持隐藏。
         if preferences.consumeIslandOnboardingPresentation() {
-            panelController.show()
+            panelController.showCompact()
         }
     }
 
@@ -59,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        panelController?.prepareForTermination()
         monitor?.stop()
     }
 

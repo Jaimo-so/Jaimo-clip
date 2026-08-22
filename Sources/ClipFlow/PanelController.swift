@@ -24,6 +24,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var localKeyMonitor: Any?
     private var globalMouseMonitor: Any?
 
+    private let compactSize = NSSize(width: 342, height: 54)
     private let expandedTargetSize = NSSize(width: 948, height: 680)
 
     init(model: AppModel, preferences: PreferencesStore) {
@@ -65,7 +66,11 @@ final class PanelController: NSObject, NSWindowDelegate {
             shell: shellModel,
             homeModel: homeModel,
             applicationsModel: applicationsModel,
-            onClose: { [weak self] in self?.hide() }
+            onClose: { [weak self] in self?.hide() },
+            onCollapse: { [weak self] in self?.collapse() },
+            onExpand: { [weak self] in self?.showExpanded() },
+            onOpenQuickNote: { [weak self] in self?.openQuickNote() },
+            onOpenCamera: { [weak self] in self?.openCameraCheck() }
         )
         let hostingView = ClipFlowHostingView(rootView: rootView)
         hostingView.translatesAutoresizingMaskIntoConstraints = false
@@ -87,11 +92,29 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func toggle() {
-        panel.isVisible ? hide() : show()
+        guard panel.isVisible else {
+            showExpanded()
+            return
+        }
+        if shellModel.presentation == .compact {
+            showExpanded()
+        } else {
+            hide()
+        }
+    }
+
+    func toggleHotKey() {
+        panel.isVisible ? hide() : showCompact()
     }
 
     func show(openSettings: Bool = false) {
         showExpanded(destination: shellModel.destination, openSettings: openSettings)
+    }
+
+    func showCompact() {
+        model.settingsOpen = false
+        model.prepareForPresentation()
+        present(size: compactSize, presentation: .compact)
     }
 
     func showExpanded(
@@ -102,7 +125,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         model.settingsOpen = openSettings
         model.prepareForPresentation()
         applicationsModel.loadIfNeeded()
-        present(size: expandedSizeForActiveScreen())
+        present(size: expandedSizeForActiveScreen(), presentation: .expanded)
 
         if shellModel.destination == .prompts || shellModel.destination == .clipboard {
             DispatchQueue.main.async {
@@ -116,13 +139,30 @@ final class PanelController: NSObject, NSWindowDelegate {
         model.updateManager.checkForUpdates()
     }
 
+    func collapse() {
+        guard panel.isVisible else { return }
+        model.settingsOpen = false
+        releaseLocalDevices()
+        homeModel.flushQuickNote()
+        present(size: compactSize, presentation: .compact)
+    }
+
     func hide() {
         model.settingsOpen = false
+        releaseLocalDevices()
+        homeModel.flushQuickNote()
         panel.orderOut(nil)
     }
 
-    private func present(size: NSSize) {
+    func prepareForTermination() {
+        releaseLocalDevices()
+        homeModel.flushQuickNote()
+    }
+
+    private func present(size: NSSize, presentation: IslandPresentationState) {
         positionAtTop(size: size)
+        shellModel.presentation = presentation
+        panel.contentView?.layer?.cornerRadius = presentation == .compact ? 27 : 28
         panel.makeKeyAndOrderFront(nil)
         panel.orderFrontRegardless()
     }
@@ -145,13 +185,15 @@ final class PanelController: NSObject, NSWindowDelegate {
             width: min(size.width, visible.width - 12),
             height: min(size.height, visible.height - 12)
         )
-        panel.minSize = fittedSize
-        panel.maxSize = fittedSize
         let origin = NSPoint(
             x: visible.midX - fittedSize.width / 2,
             y: visible.maxY - fittedSize.height - 8
         )
+        panel.minSize = NSSize(width: 1, height: 1)
+        panel.maxSize = NSSize(width: 10_000, height: 10_000)
         panel.setFrame(NSRect(origin: origin, size: fittedSize), display: true)
+        panel.minSize = fittedSize
+        panel.maxSize = fittedSize
     }
 
     private func activeScreen() -> NSScreen? {
@@ -168,6 +210,24 @@ final class PanelController: NSObject, NSWindowDelegate {
         case .clipboard: model.setMode(.history)
         case .home, .applications: break
         }
+    }
+
+    private func openQuickNote() {
+        showExpanded(destination: .home)
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .jaimoFocusQuickNote, object: nil)
+        }
+    }
+
+    private func openCameraCheck() {
+        showExpanded(destination: .home)
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .jaimoStartCamera, object: nil)
+        }
+    }
+
+    private func releaseLocalDevices() {
+        NotificationCenter.default.post(name: .jaimoStopLocalDevices, object: nil)
     }
 
     private func installKeyMonitor() {
@@ -187,14 +247,30 @@ final class PanelController: NSObject, NSWindowDelegate {
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
-            DispatchQueue.main.async { self?.hide() }
+            DispatchQueue.main.async {
+                guard let self, self.panel.isVisible else { return }
+                guard !self.hasBlockingModal else { return }
+                if self.shellModel.presentation == .expanded {
+                    self.collapse()
+                } else {
+                    self.hide()
+                }
+            }
         }
+    }
+
+    private var hasBlockingModal: Bool {
+        model.settingsOpen
+            || model.promptEditorOpen
+            || model.promptRunnerOpen
+            || model.promptDeleteConfirmationOpen
     }
 
     private func handleKey(keyCode: UInt16, flags: NSEvent.ModifierFlags, key: String) -> Bool {
         guard panel.isVisible else { return false }
         let command = flags.contains(.command)
         let shift = flags.contains(.shift)
+        let option = flags.contains(.option)
 
         if command, routeStandardTextCommand(key) {
             return true
@@ -204,7 +280,11 @@ final class PanelController: NSObject, NSWindowDelegate {
             guard !model.promptEditorOpen,
                   !model.promptRunnerOpen,
                   !model.promptDeleteConfirmationOpen else { return true }
-            model.settingsOpen.toggle()
+            if shellModel.presentation == .compact {
+                showExpanded(openSettings: true)
+            } else {
+                model.settingsOpen.toggle()
+            }
             return true
         }
 
@@ -249,6 +329,25 @@ final class PanelController: NSObject, NSWindowDelegate {
             return true
         }
 
+        if shellModel.presentation == .compact {
+            if keyCode == UInt16(kVK_Escape) {
+                hide()
+                return true
+            }
+            return false
+        }
+
+        if shellModel.destination == .home, option, homeModel.editingWidget != nil {
+            if keyCode == UInt16(kVK_UpArrow) {
+                homeModel.moveSelectedWidget(by: -1)
+                return true
+            }
+            if keyCode == UInt16(kVK_DownArrow) {
+                homeModel.moveSelectedWidget(by: 1)
+                return true
+            }
+        }
+
         if command && key == "f" {
             switch shellModel.destination {
             case .applications:
@@ -282,7 +381,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             } else if shellModel.destination == .prompts, !model.promptQuery.isEmpty {
                 model.promptQuery = ""
             } else {
-                hide()
+                collapse()
             }
             return true
         }

@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+enum IslandPresentationState: Equatable {
+    case compact
+    case expanded
+}
+
 enum ToolDestination: String, CaseIterable, Identifiable {
     case home
     case applications
@@ -30,6 +35,7 @@ enum ToolDestination: String, CaseIterable, Identifiable {
 
 @MainActor
 final class IslandShellModel: ObservableObject {
+    @Published var presentation: IslandPresentationState = .compact
     @Published var destination: ToolDestination {
         didSet { defaults.set(destination.rawValue, forKey: Self.destinationKey) }
     }
@@ -49,6 +55,10 @@ struct IslandRootView: View {
     @ObservedObject var homeModel: HomeDashboardModel
     @ObservedObject var applicationsModel: ApplicationsModel
     let onClose: () -> Void
+    let onCollapse: () -> Void
+    let onExpand: () -> Void
+    let onOpenQuickNote: () -> Void
+    let onOpenCamera: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -59,10 +69,18 @@ struct IslandRootView: View {
             VisualEffectBackground().ignoresSafeArea()
             theme.glass.opacity(colorScheme == .dark ? 0.92 : 0.96).ignoresSafeArea()
 
-            expandedContent(theme)
-                .disabled(model.settingsOpen)
+            Group {
+                switch shell.presentation {
+                case .compact:
+                    compactContent(theme)
+                        .transition(presentationTransition)
+                case .expanded:
+                    expandedContent(theme)
+                        .transition(presentationTransition)
+                }
+            }
 
-            if model.settingsOpen {
+            if shell.presentation == .expanded, model.settingsOpen {
                 SettingsView(model: model)
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.975)))
                     .zIndex(30)
@@ -75,21 +93,83 @@ struct IslandRootView: View {
             }
         }
         .foregroundStyle(theme.foreground)
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: shell.presentation == .compact ? 27 : 28, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
+            RoundedRectangle(cornerRadius: shell.presentation == .compact ? 27 : 28, style: .continuous)
                 .stroke((colorScheme == .dark ? Color.white : Color.black).opacity(0.16), lineWidth: 0.5)
         }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: shell.presentation)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.settingsOpen)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.toastMessage)
+    }
+
+    private var presentationTransition: AnyTransition {
+        if reduceMotion { return .opacity }
+        return .opacity.combined(with: .scale(scale: 0.985, anchor: .top))
+    }
+
+    private func compactContent(_ theme: ClipFlowTheme) -> some View {
+        HStack(spacing: 8) {
+            Button(action: onExpand) {
+                HStack(spacing: 8) {
+                    IslandBrandMark(size: 34)
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(context.date, format: .dateTime.hour().minute())
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .monospacedDigit()
+                            Text("剪切板已记录 \(model.items.count) 条 · 本地运行中")
+                                .font(.system(size: 9.5))
+                                .foregroundStyle(theme.muted)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("展开 Jaimo 工具站")
+            .help("展开工具站")
+
+            Spacer(minLength: 0)
+
+            compactAction("note.text", label: "打开快速便签", action: onOpenQuickNote)
+            compactAction("video", label: "检查摄像头", action: onOpenCamera)
+            compactAction("chevron.down", label: "展开工具站", action: onExpand, emphasized: true)
+        }
+        .padding(.horizontal, 7)
+        .frame(height: 54)
+    }
+
+    private func compactAction(
+        _ symbol: String,
+        label: String,
+        action: @escaping () -> Void,
+        emphasized: Bool = false
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12.5, weight: .medium))
+                .frame(width: 32, height: 32)
+        }
+        .buttonStyle(IslandCompactButtonStyle(emphasized: emphasized))
+        .accessibilityLabel(label)
+        .help(label)
     }
 
     private func expandedContent(_ theme: ClipFlowTheme) -> some View {
         VStack(spacing: 0) {
             topBar(theme)
+                .disabled(libraryModalOpen)
+                .accessibilityHidden(libraryModalOpen)
             Divider().overlay(theme.hairline)
             destinationContent
         }
+        .disabled(model.settingsOpen)
+    }
+
+    private var libraryModalOpen: Bool {
+        model.promptEditorOpen || model.promptRunnerOpen || model.promptDeleteConfirmationOpen
     }
 
     private func topBar(_ theme: ClipFlowTheme) -> some View {
@@ -155,13 +235,21 @@ struct IslandRootView: View {
                     .accessibilityLabel("打开设置")
                     .help("设置（⌘,）")
 
+                    Button(action: onCollapse) {
+                        Image(systemName: "chevron.up")
+                            .frame(width: 34, height: 34)
+                    }
+                    .buttonStyle(IslandIconButtonStyle())
+                    .accessibilityLabel("收起为灵动岛")
+                    .help("收起工具站（Esc）")
+
                     Button(action: onClose) {
                         Image(systemName: "xmark")
                             .frame(width: 34, height: 34)
                     }
                     .buttonStyle(IslandIconButtonStyle())
-                    .accessibilityLabel("关闭工具站")
-                    .help("关闭工具站（Esc）")
+                    .accessibilityLabel("隐藏 Jaimo")
+                    .help("隐藏 Jaimo")
                 }
             }
             .padding(.horizontal, 14)
@@ -196,6 +284,29 @@ struct IslandRootView: View {
         case .clipboard: model.setMode(.history)
         case .home, .applications: break
         }
+    }
+}
+
+private struct IslandCompactButtonStyle: ButtonStyle {
+    let emphasized: Bool
+    @Environment(\.colorScheme) private var colorScheme
+
+    func makeBody(configuration: Configuration) -> some View {
+        let theme = ClipFlowTheme(scheme: colorScheme)
+        configuration.label
+            .foregroundStyle(emphasized ? theme.foreground : theme.foregroundSecondary)
+            .background(
+                configuration.isPressed
+                    ? theme.chipHigh
+                    : (emphasized ? theme.accent.opacity(0.18) : Color.clear)
+            )
+            .overlay {
+                if emphasized {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(theme.accent.opacity(0.24), lineWidth: 0.5)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -256,4 +367,5 @@ extension Notification.Name {
     static let jaimoFocusQuickNote = Notification.Name("jaimo.focusQuickNote")
     static let jaimoStartCamera = Notification.Name("jaimo.startCamera")
     static let jaimoFocusApplicationSearch = Notification.Name("jaimo.focusApplicationSearch")
+    static let jaimoStopLocalDevices = Notification.Name("jaimo.stopLocalDevices")
 }

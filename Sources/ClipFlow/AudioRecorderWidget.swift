@@ -1,5 +1,5 @@
 import AppKit
-import AVFoundation
+@preconcurrency import AVFoundation
 import SwiftUI
 
 @MainActor
@@ -22,6 +22,7 @@ final class AudioRecorderModel: NSObject, ObservableObject, AVAudioRecorderDeleg
     private var recorder: AVAudioRecorder?
     private var meterTimer: Timer?
     private var currentRecordingURL: URL?
+    private var operationID = UUID()
 
     var isRecording: Bool { status == .recording }
     var isPaused: Bool { status == .paused }
@@ -63,15 +64,17 @@ final class AudioRecorderModel: NSObject, ObservableObject, AVAudioRecorderDeleg
 
     func start() {
         guard !isActive, status != .requesting else { return }
+        let operationID = UUID()
+        self.operationID = operationID
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
-            beginRecording()
+            beginRecording(operationID: operationID)
         case .notDetermined:
             status = .requesting
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
                 DispatchQueue.main.async {
-                    guard let self else { return }
-                    granted ? self.beginRecording() : self.setDenied()
+                    guard let self, self.operationID == operationID else { return }
+                    granted ? self.beginRecording(operationID: operationID) : self.setDenied()
                 }
             }
         case .denied, .restricted:
@@ -83,6 +86,7 @@ final class AudioRecorderModel: NSObject, ObservableObject, AVAudioRecorderDeleg
 
     func finish() {
         guard isActive, let recorder else { return }
+        operationID = UUID()
         let duration = recorder.currentTime
         recorder.stop()
         stopMetering()
@@ -100,7 +104,12 @@ final class AudioRecorderModel: NSObject, ObservableObject, AVAudioRecorderDeleg
     }
 
     func finishIfNeeded() {
-        if isActive { finish() }
+        if isActive {
+            finish()
+        } else if status == .requesting {
+            operationID = UUID()
+            status = .idle
+        }
     }
 
     func openPrivacySettings() {
@@ -113,7 +122,8 @@ final class AudioRecorderModel: NSObject, ObservableObject, AVAudioRecorderDeleg
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
-    private func beginRecording() {
+    private func beginRecording(operationID: UUID) {
+        guard self.operationID == operationID else { return }
         do {
             guard AVCaptureDevice.default(for: .audio) != nil else {
                 status = .unavailable

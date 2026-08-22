@@ -1,6 +1,39 @@
 import AppKit
-import AVFoundation
+@preconcurrency import AVFoundation
 import SwiftUI
+
+enum HomeWidgetLayoutRole: String, Codable {
+    case compact
+    case regular
+    case wide
+}
+
+struct HomeWidgetDescriptor: Identifiable {
+    let id: HomeDashboardModel.WidgetID
+    let title: String
+    let defaultOrder: Int
+    let defaultVisibility: Bool
+    let layoutRole: HomeWidgetLayoutRole
+}
+
+enum HomeWidgetRegistry {
+    static let descriptors: [HomeWidgetDescriptor] = [
+        .init(id: .clock, title: "时间", defaultOrder: 0, defaultVisibility: true, layoutRole: .regular),
+        .init(id: .quickNote, title: "快速便签", defaultOrder: 1, defaultVisibility: true, layoutRole: .regular),
+        .init(id: .audioRecorder, title: "录音", defaultOrder: 2, defaultVisibility: true, layoutRole: .regular),
+        .init(id: .camera, title: "摄像头检查", defaultOrder: 3, defaultVisibility: true, layoutRole: .regular),
+        .init(id: .recentApplications, title: "最近使用", defaultOrder: 4, defaultVisibility: true, layoutRole: .regular)
+    ]
+
+    static var orderedIDs: [HomeDashboardModel.WidgetID] {
+        descriptors.sorted { $0.defaultOrder < $1.defaultOrder }.map(\.id)
+    }
+
+    static func descriptor(for id: HomeDashboardModel.WidgetID) -> HomeWidgetDescriptor {
+        descriptors.first { $0.id == id }
+            ?? .init(id: id, title: id.rawValue, defaultOrder: .max, defaultVisibility: true, layoutRole: .regular)
+    }
+}
 
 @MainActor
 final class HomeDashboardModel: ObservableObject {
@@ -14,21 +47,31 @@ final class HomeDashboardModel: ObservableObject {
         var id: String { rawValue }
 
         var title: String {
+            HomeWidgetRegistry.descriptor(for: self).title
+        }
+    }
+
+    enum QuickNoteSaveStatus: Equatable {
+        case saving
+        case saved
+        case failed
+
+        var text: String {
             switch self {
-            case .clock: return "时间"
-            case .quickNote: return "快速便签"
-            case .audioRecorder: return "录音"
-            case .camera: return "摄像头检查"
-            case .recentApplications: return "最近使用"
+            case .saving: return "正在保存…"
+            case .saved: return "已保存 · 仅本机"
+            case .failed: return "保存失败，请继续输入后重试"
             }
         }
     }
 
     @Published var quickNote: String {
-        didSet { defaults.set(quickNote, forKey: Key.quickNote) }
+        didSet { scheduleQuickNoteSave() }
     }
+    @Published private(set) var quickNoteSaveStatus: QuickNoteSaveStatus = .saved
     @Published private(set) var widgetOrder: [WidgetID]
     @Published private(set) var hiddenWidgets: Set<WidgetID>
+    @Published private(set) var editingWidget: WidgetID?
 
     private enum Key {
         static let quickNote = "home.quickNote"
@@ -37,18 +80,24 @@ final class HomeDashboardModel: ObservableObject {
     }
 
     private let defaults: UserDefaults
+    private var quickNoteSaveWorkItem: DispatchWorkItem?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         quickNote = defaults.string(forKey: Key.quickNote) ?? ""
 
+        let registeredIDs = HomeWidgetRegistry.orderedIDs
         let savedOrder = defaults.stringArray(forKey: Key.widgetOrder) ?? []
         let decodedOrder = savedOrder.compactMap(WidgetID.init(rawValue:))
-        let missing = WidgetID.allCases.filter { !decodedOrder.contains($0) }
+        let missing = registeredIDs.filter { !decodedOrder.contains($0) }
         widgetOrder = decodedOrder + missing
 
         let hidden = defaults.stringArray(forKey: Key.hiddenWidgets) ?? []
-        hiddenWidgets = Set(hidden.compactMap(WidgetID.init(rawValue:)))
+        let defaultHidden = missing.filter {
+            !HomeWidgetRegistry.descriptor(for: $0).defaultVisibility
+        }
+        hiddenWidgets = Set(hidden.compactMap(WidgetID.init(rawValue:))).union(defaultHidden)
+        editingWidget = nil
     }
 
     var visibleWidgets: [WidgetID] {
@@ -64,8 +113,28 @@ final class HomeDashboardModel: ObservableObject {
         persistLayout()
     }
 
+    func beginEditingWidgets() {
+        editingWidget = editingWidget ?? visibleWidgets.first
+    }
+
+    func finishEditingWidgets() {
+        editingWidget = nil
+    }
+
+    func selectWidget(_ widget: WidgetID) {
+        editingWidget = widget
+    }
+
+    func moveSelectedWidget(by offset: Int) {
+        guard let editingWidget else { return }
+        move(editingWidget, by: offset)
+    }
+
     func hide(_ widget: WidgetID) {
         hiddenWidgets.insert(widget)
+        if editingWidget == widget {
+            editingWidget = visibleWidgets.first
+        }
         persistLayout()
     }
 
@@ -78,6 +147,32 @@ final class HomeDashboardModel: ObservableObject {
         defaults.set(widgetOrder.map(\.rawValue), forKey: Key.widgetOrder)
         defaults.set(hiddenWidgets.map(\.rawValue).sorted(), forKey: Key.hiddenWidgets)
     }
+
+    func flushQuickNote() {
+        quickNoteSaveWorkItem?.cancel()
+        quickNoteSaveWorkItem = nil
+        persistQuickNote(quickNote)
+    }
+
+    private func scheduleQuickNoteSave() {
+        quickNoteSaveWorkItem?.cancel()
+        quickNoteSaveStatus = .saving
+        let value = quickNote
+        let workItem = DispatchWorkItem { [weak self] in
+            Task { @MainActor in
+                self?.persistQuickNote(value)
+            }
+        }
+        quickNoteSaveWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: workItem)
+    }
+
+    private func persistQuickNote(_ value: String) {
+        defaults.set(value, forKey: Key.quickNote)
+        guard quickNote == value else { return }
+        quickNoteSaveWorkItem = nil
+        quickNoteSaveStatus = defaults.string(forKey: Key.quickNote) == value ? .saved : .failed
+    }
 }
 
 struct HomeDashboardView: View {
@@ -89,6 +184,7 @@ struct HomeDashboardView: View {
     @StateObject private var audioRecorderModel = AudioRecorderModel()
     @State private var editingWidgets = false
     @FocusState private var noteFocused: Bool
+    @FocusState private var focusedWidget: HomeDashboardModel.WidgetID?
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -104,7 +200,17 @@ struct HomeDashboardView: View {
                 }
                 Spacer()
                 Button {
-                    editingWidgets.toggle()
+                    let willEdit = !editingWidgets
+                    editingWidgets = willEdit
+                    if willEdit {
+                        model.beginEditingWidgets()
+                        DispatchQueue.main.async {
+                            focusedWidget = model.editingWidget
+                        }
+                    } else {
+                        model.finishEditingWidgets()
+                        focusedWidget = nil
+                    }
                 } label: {
                     Label(editingWidgets ? "完成" : "管理组件", systemImage: editingWidgets ? "checkmark" : "slider.horizontal.3")
                 }
@@ -132,6 +238,13 @@ struct HomeDashboardView: View {
                             ForEach(model.visibleWidgets) { widget in
                                 widgetView(widget, theme: theme)
                                     .frame(minHeight: 176)
+                                    .focusable(editingWidgets)
+                                    .focused($focusedWidget, equals: widget)
+                                    .onTapGesture {
+                                        guard editingWidgets else { return }
+                                        model.selectWidget(widget)
+                                        focusedWidget = widget
+                                    }
                             }
                         }
                     }
@@ -145,9 +258,22 @@ struct HomeDashboardView: View {
         .onReceive(NotificationCenter.default.publisher(for: .jaimoStartCamera)) { _ in
             cameraModel.start()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .jaimoStopLocalDevices)) { _ in
+            cameraModel.stop()
+            audioRecorderModel.finishIfNeeded()
+        }
+        .onChange(of: focusedWidget) { focused in
+            guard editingWidgets, let focused else { return }
+            model.selectWidget(focused)
+        }
+        .onChange(of: model.hiddenWidgets) { hidden in
+            if hidden.contains(.camera) { cameraModel.stop() }
+            if hidden.contains(.audioRecorder) { audioRecorderModel.finishIfNeeded() }
+        }
         .onDisappear {
             cameraModel.stop()
             audioRecorderModel.finishIfNeeded()
+            model.flushQuickNote()
         }
     }
 
@@ -208,7 +334,7 @@ struct HomeDashboardView: View {
         case .quickNote:
             IslandWidgetCard(
                 title: widget.title,
-                subtitle: "内容自动保存在本机",
+                subtitle: model.quickNoteSaveStatus.text,
                 widget: widget,
                 editing: editingWidgets,
                 model: model
@@ -394,11 +520,17 @@ private struct IslandWidgetCard<Content: View>: View {
         .background(theme.glassSecondary.opacity(0.72))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(theme.hairline, style: editing
-                        ? StrokeStyle(lineWidth: 0.7, dash: [4, 4])
-                        : StrokeStyle(lineWidth: 0.5))
+                .stroke(
+                    editing && model.editingWidget == widget ? theme.accent.opacity(0.72) : theme.hairline,
+                    style: editing
+                        ? StrokeStyle(lineWidth: model.editingWidget == widget ? 1.2 : 0.7, dash: [4, 4])
+                        : StrokeStyle(lineWidth: 0.5)
+                )
         }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(title)组件")
+        .accessibilityHint(editing ? "按 Option 加上下方向键调整顺序" : "")
     }
 
     private func editButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
@@ -452,6 +584,7 @@ final class CameraCheckModel: ObservableObject {
 
     private let sessionQueue = DispatchQueue(label: "com.clipflow.camera-preview", qos: .userInitiated)
     private var configured = false
+    private var operationID = UUID()
 
     var isRunning: Bool { status == .running }
     var canOpenSettings: Bool { status == .denied }
@@ -468,15 +601,17 @@ final class CameraCheckModel: ObservableObject {
     }
 
     func start() {
+        let operationID = UUID()
+        self.operationID = operationID
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
-            configureAndStart()
+            configureAndStart(operationID: operationID)
         case .notDetermined:
             status = .requesting
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 DispatchQueue.main.async {
-                    guard let self else { return }
-                    granted ? self.configureAndStart() : self.setDenied()
+                    guard let self, self.operationID == operationID else { return }
+                    granted ? self.configureAndStart(operationID: operationID) : self.setDenied()
                 }
             }
         case .denied, .restricted:
@@ -487,11 +622,18 @@ final class CameraCheckModel: ObservableObject {
     }
 
     func stop() {
-        guard session.isRunning || status == .running || status == .requesting else { return }
+        operationID = UUID()
+        let shouldTearDown = configured || session.isRunning || status == .running || status == .requesting
         status = .idle
+        guard shouldTearDown else { return }
+        configured = false
         let session = session
         sessionQueue.async {
             if session.isRunning { session.stopRunning() }
+            guard !session.inputs.isEmpty else { return }
+            session.beginConfiguration()
+            session.inputs.forEach(session.removeInput)
+            session.commitConfiguration()
         }
     }
 
@@ -500,7 +642,7 @@ final class CameraCheckModel: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
-    private func configureAndStart() {
+    private func configureAndStart(operationID: UUID) {
         guard status != .running else { return }
         status = .requesting
         let session = session
@@ -525,16 +667,27 @@ final class CameraCheckModel: ObservableObject {
                     session.commitConfiguration()
                 }
                 if !session.isRunning { session.startRunning() }
-                DispatchQueue.main.async { self?.status = .running }
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if self.operationID == operationID {
+                        self.status = .running
+                    } else {
+                        self.sessionQueue.async {
+                            if session.isRunning { session.stopRunning() }
+                        }
+                    }
+                }
             } catch CameraError.unavailable {
                 DispatchQueue.main.async {
-                    self?.configured = false
-                    self?.status = .unavailable
+                    guard let self, self.operationID == operationID else { return }
+                    self.configured = false
+                    self.status = .unavailable
                 }
             } catch {
                 DispatchQueue.main.async {
-                    self?.configured = false
-                    self?.status = .failed("无法启动摄像头")
+                    guard let self, self.operationID == operationID else { return }
+                    self.configured = false
+                    self.status = .failed("无法启动摄像头")
                 }
             }
         }
@@ -581,5 +734,9 @@ private final class CameraPreviewNSView: NSView {
     override func layout() {
         super.layout()
         previewLayer.frame = bounds
+        if let connection = previewLayer.connection, connection.isVideoMirroringSupported {
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = true
+        }
     }
 }
